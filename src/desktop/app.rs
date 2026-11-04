@@ -210,7 +210,8 @@ impl DesktopApp {
             .frame(Frame::new().fill(Color32::from_rgb(10, 14, 13)))
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let drag_width = (ui.available_width() - 138.0).max(20.0);
+                    let controls_width = 138.0 + ui.spacing().item_spacing.x * 3.0;
+                    let drag_width = (ui.available_width() - controls_width).max(20.0);
                     let (rect, response) = ui
                         .allocate_exact_size(Vec2::new(drag_width, 42.0), Sense::click_and_drag());
                     let dot = egui::pos2(rect.left() + 16.0, rect.center().y);
