@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "IsItSafe Download Origin",
+  "description": "Provides download origin metadata to the local IsItSafe checker.",
+  "version": "0.1.0",
+  "permissions": [
+    "downloads"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "isitsafe-origin@example.invalid",
+      "strict_min_version": "115.0"
+    }
+  }
+}
+

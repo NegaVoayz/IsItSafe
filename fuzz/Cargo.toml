@@ -1,0 +1,41 @@
+[package]
+name = "isitsafe-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+isitsafe = { path = ".." }
+
+[[bin]]
+name = "analysis"
+path = "fuzz_targets/analysis.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pe"
+path = "fuzz_targets/pe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zip"
+path = "fuzz_targets/zip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "documents"
+path = "fuzz_targets/documents.rs"
+test = false
+doc = false
+bench = false
+

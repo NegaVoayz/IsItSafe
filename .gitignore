@@ -1,0 +1,12 @@
+/target/
+/fuzz/target/
+/fuzz/Cargo.lock
+/dist/
+/.isitsafe/
+/config.toml
+/SECRET
+*.db
+*.db-shm
+*.db-wal
+*.log
+

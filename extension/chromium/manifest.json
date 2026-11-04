@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "IsItSafe Download Origin",
+  "description": "Provides download origin metadata to the local IsItSafe checker.",
+  "version": "0.1.0",
+  "permissions": [
+    "downloads"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "minimum_chrome_version": "109"
+}
+
