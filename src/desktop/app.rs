@@ -426,32 +426,31 @@ impl DesktopApp {
                                             }
                                             ui.horizontal_wrapped(|ui| {
                                                 ui.spacing_mut().item_spacing.x = 6.0;
-                                                let mut shown = Vec::new();
+                                                let mut compact_reasons = Vec::new();
                                                 for reason in &entry.summary.reasons {
                                                     let compact = compact_reason(reason);
                                                     if compact.is_empty()
-                                                        || shown
+                                                        || compact_reasons
                                                             .iter()
                                                             .any(|existing| existing == &compact)
                                                     {
                                                         continue;
                                                     }
+                                                    compact_reasons.push(compact);
+                                                }
+                                                let shown_count = compact_reasons.len().min(3);
+                                                for compact in compact_reasons.iter().take(3) {
                                                     reason_badge(
                                                         ui,
-                                                        &compact,
+                                                        compact,
                                                         risk_color(entry.group),
                                                     );
-                                                    shown.push(compact);
-                                                    if shown.len() == 3 {
-                                                        break;
-                                                    }
                                                 }
-                                                if entry.summary.reasons.len() > shown.len() {
+                                                if compact_reasons.len() > shown_count {
                                                     ui.label(
                                                         RichText::new(format!(
                                                             "+{} more",
-                                                            entry.summary.reasons.len()
-                                                                - shown.len()
+                                                            compact_reasons.len() - shown_count
                                                         ))
                                                         .size(9.5)
                                                         .color(MUTED),
