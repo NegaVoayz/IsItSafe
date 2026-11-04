@@ -114,25 +114,31 @@ pub fn evaluate(report: &mut AnalysisReportV1, config: &Config) {
             ReputationState::Unavailable | ReputationState::NotQueried
         )
     });
+    let is_ooxml = report
+        .classification
+        .formats
+        .iter()
+        .any(|format| format.kind.starts_with("ooxml:"));
     let high_risk_type = report.classification.extension_mismatch
         || report.classification.risky_trailing_data
         || report.classification.formats.iter().any(|format| {
-            matches!(
-                format.kind.as_str(),
-                "pe" | "msi"
-                    | "ole_cfb"
-                    | "zip"
-                    | "cab"
-                    | "7z"
-                    | "rar"
-                    | "powershell"
-                    | "batch"
-                    | "vbscript"
-                    | "javascript"
-                    | "hta"
-                    | "lnk"
-                    | "svg"
-            ) || format.kind.starts_with("installer:")
+            (format.kind != "zip" || !is_ooxml)
+                && (matches!(
+                    format.kind.as_str(),
+                    "pe" | "msi"
+                        | "ole_cfb"
+                        | "zip"
+                        | "cab"
+                        | "7z"
+                        | "rar"
+                        | "powershell"
+                        | "batch"
+                        | "vbscript"
+                        | "javascript"
+                        | "hta"
+                        | "lnk"
+                        | "svg"
+                ) || format.kind.starts_with("installer:"))
         });
 
     if confirmed_malicious {
@@ -574,6 +580,12 @@ mod tests {
     fn ordinary_ooxml_does_not_require_a_network_verdict() {
         let mut report = AnalysisReportV1::new(FileEvidence::default());
         report.classification.formats.push(DetectedFormat {
+            kind: "zip".into(),
+            offset: 0,
+            confidence: Confidence::Structural,
+            parser: "zip".into(),
+        });
+        report.classification.formats.push(DetectedFormat {
             kind: "ooxml:pptx".into(),
             offset: 0,
             confidence: Confidence::Structural,
@@ -600,6 +612,12 @@ mod tests {
     #[test]
     fn active_ooxml_content_remains_high_risk_without_a_network_verdict() {
         let mut report = AnalysisReportV1::new(FileEvidence::default());
+        report.classification.formats.push(DetectedFormat {
+            kind: "zip".into(),
+            offset: 0,
+            confidence: Confidence::Structural,
+            parser: "zip".into(),
+        });
         report.classification.formats.push(DetectedFormat {
             kind: "ooxml:docm".into(),
             offset: 0,
