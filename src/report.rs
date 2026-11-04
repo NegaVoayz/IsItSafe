@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: &str = "1.0";
+pub const SCHEMA_VERSION: &str = "1.1";
 pub const REPORT_SUMMARY_SCHEMA_VERSION: &str = "1.0";
 pub const LIMITATION_NOTICE: &str =
     "Static analysis found no high-risk content; this does not prove runtime safety.";
@@ -29,6 +29,8 @@ pub struct AnalysisReportV1 {
     pub child_execution: Option<ChildExecution>,
     pub certificates: Vec<CertificateChainEvidence>,
     pub components: Vec<ComponentEvidence>,
+    #[serde(default)]
+    pub products: Vec<ProductIdentityEvidence>,
     pub authenticity: Option<AuthenticityEvidence>,
     pub reputation: Vec<ReputationEvidence>,
     pub policy: PolicyDecision,
@@ -57,6 +59,7 @@ impl AnalysisReportV1 {
             child_execution: None,
             certificates: Vec::new(),
             components: Vec::new(),
+            products: Vec::new(),
             authenticity: None,
             reputation: Vec::new(),
             policy: PolicyDecision::default(),
@@ -547,6 +550,35 @@ pub struct ComponentEvidence {
     pub evidence: Vec<Evidence>,
 }
 
+/// Product metadata declared by an executable or installer package. This is
+/// what the file claims it will install; it is not proof of runtime behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProductIdentityEvidence {
+    pub product_name: Option<String>,
+    pub manufacturer: Option<String>,
+    pub product_version: Option<String>,
+    pub product_code: Option<String>,
+    pub upgrade_code: Option<String>,
+    pub original_filename: Option<String>,
+    pub file_description: Option<String>,
+    pub legal_copyright: Option<String>,
+    pub source: String,
+    pub nesting_path: Option<String>,
+}
+
+impl ProductIdentityEvidence {
+    pub fn is_meaningful(&self) -> bool {
+        self.product_name.is_some()
+            || self.manufacturer.is_some()
+            || self.product_version.is_some()
+            || self.product_code.is_some()
+            || self.upgrade_code.is_some()
+            || self.original_filename.is_some()
+            || self.file_description.is_some()
+            || self.legal_copyright.is_some()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReputationEvidence {
     pub sha256: String,
@@ -645,6 +677,7 @@ mod tests {
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["schema_version"], SCHEMA_VERSION);
         assert_eq!(json["limitations_notice"], LIMITATION_NOTICE);
+        assert_eq!(json["products"], serde_json::json!([]));
         assert!(json.get("source_path").is_none());
     }
 

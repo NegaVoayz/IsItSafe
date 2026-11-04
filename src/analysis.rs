@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
@@ -14,8 +14,9 @@ use crate::config::{Config, LimitsConfig};
 use crate::detect;
 use crate::report::{
     AuthenticityEvidence, Boundary, BoundaryKind, CertificateChainEvidence, CertificateRole,
-    Classification, ComponentEvidence, Confidence, Evidence, PublisherReputation,
-    RevocationEvidence, RevocationState, SandboxSelfTest, Severity, TimestampState,
+    Classification, ComponentEvidence, Confidence, Evidence, ProductIdentityEvidence,
+    PublisherReputation, RevocationEvidence, RevocationState, SandboxSelfTest, Severity,
+    TimestampState,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,7 @@ pub struct ChildAnalysis {
     pub inference: Vec<Evidence>,
     pub boundaries: Vec<Boundary>,
     pub components: Vec<ComponentEvidence>,
+    pub products: Vec<ProductIdentityEvidence>,
     pub certificates: Vec<CertificateChainEvidence>,
     pub authenticity: Option<AuthenticityEvidence>,
     pub sandbox_proof: Option<ChildSandboxProof>,
@@ -105,7 +107,7 @@ pub fn analyze_bytes_with_rules(
         .iter()
         .any(|format| format.kind == "pe")
     {
-        analyze_pe(data, limits, &mut analysis);
+        analyze_pe(path, data, limits, &mut analysis);
     }
     inspect_magic_polyglots(data, &mut analysis);
     analyze_containers(path, data, "", 0, &mut budget, &mut analysis);
@@ -743,6 +745,7 @@ fn analyze_archive_member(
     child_evidence.extend(feature_analysis.facts);
     let hash = hex::encode(Sha256::digest(member));
     let signed = sign_status(member);
+    record_pe_product(member, child_path, analysis);
     let severity = if child_evidence
         .iter()
         .any(|item| item.severity >= Severity::High)
@@ -794,7 +797,11 @@ fn contains_container(data: &[u8]) -> bool {
             .any(|format| matches!(format.kind.as_str(), "zip" | "rar"))
 }
 
-fn analyze_pe(data: &[u8], _limits: &AnalysisLimits, analysis: &mut ChildAnalysis) {
+fn analyze_pe(path: &Path, data: &[u8], _limits: &AnalysisLimits, analysis: &mut ChildAnalysis) {
+    if let Some(product) = pe_product_identity(data, None) {
+        note_product_identity_mismatch(path, &product, analysis);
+        analysis.products.push(product);
+    }
     if let Some((overlay_offset, sections)) = pe_overlay(data) {
         analysis.facts.push(evidence(
             "pe:structure",
@@ -857,12 +864,15 @@ fn analyze_pe(data: &[u8], _limits: &AnalysisLimits, analysis: &mut ChildAnalysi
             let timestamp_present = data.windows(10).any(|window| {
                 window == [0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x03]
             });
+            let mut leaf_usage = HashMap::new();
             for certificate in info.certificates.iter() {
                 let encoded = match certificate.certificate.to_der() {
                     Ok(value) => value,
                     Err(_) => continue,
                 };
                 let (subject, issuer, serial, ocsp_urls, crl_urls) = parse_certificate(&encoded);
+                let (code_signing, time_stamping) = certificate_usage(&encoded);
+                leaf_usage.insert(subject.clone(), (code_signing, time_stamping));
                 analysis.certificates.push(CertificateChainEvidence {
                     subject,
                     issuer,
@@ -885,12 +895,18 @@ fn analyze_pe(data: &[u8], _limits: &AnalysisLimits, analysis: &mut ChildAnalysi
                 .iter()
                 .map(|certificate| certificate.issuer.clone())
                 .collect();
-            let mut publisher = None;
+            let mut leaf_candidates = Vec::new();
             for certificate in &mut analysis.certificates {
                 certificate.role = if !issuers.contains(&certificate.subject) {
-                    if publisher.is_none() {
-                        publisher = Some(certificate.subject.clone());
-                    }
+                    let (code_signing, time_stamping) = leaf_usage
+                        .get(&certificate.subject)
+                        .copied()
+                        .unwrap_or((false, false));
+                    leaf_candidates.push((
+                        certificate.subject.clone(),
+                        code_signing,
+                        time_stamping,
+                    ));
                     CertificateRole::Leaf
                 } else if certificate.issuer == certificate.subject {
                     CertificateRole::Root
@@ -898,6 +914,7 @@ fn analyze_pe(data: &[u8], _limits: &AnalysisLimits, analysis: &mut ChildAnalysi
                     CertificateRole::Intermediate
                 };
             }
+            let publisher = select_publisher(&leaf_candidates);
             analysis.authenticity = Some(AuthenticityEvidence {
                 signature_digest_valid: digest_valid,
                 chain_valid: None,
@@ -1058,6 +1075,7 @@ fn analyze_cab(
             Severity::Info
         };
         let signed = sign_status(&member);
+        record_pe_product(&member, &child_path, analysis);
         analysis.components.push(ComponentEvidence {
             nesting_path: child_path,
             name: safe_name,
@@ -1091,6 +1109,37 @@ fn analyze_msi(
             return;
         }
     };
+    let mut product = ProductIdentityEvidence {
+        source: "MSI Property table and summary information".into(),
+        nesting_path: (!nesting_path.is_empty()).then(|| nesting_path.to_string()),
+        ..ProductIdentityEvidence::default()
+    };
+    {
+        let summary = package.summary_info();
+        product.product_name = metadata_value(summary.title());
+        product.manufacturer = metadata_value(summary.author());
+        product.file_description = metadata_value(summary.subject());
+    }
+    if let Ok(rows) = package.select_rows(Select::table("Property")) {
+        for row in rows.take(512) {
+            if row.len() < 2 {
+                continue;
+            }
+            let key = row[0].to_string().to_ascii_uppercase();
+            let value = metadata_value(Some(&row[1].to_string()));
+            match key.as_str() {
+                "PRODUCTNAME" => product.product_name = value,
+                "MANUFACTURER" => product.manufacturer = value,
+                "PRODUCTVERSION" => product.product_version = value,
+                "PRODUCTCODE" => product.product_code = value,
+                "UPGRADECODE" => product.upgrade_code = value,
+                _ => {}
+            }
+        }
+    }
+    if product.is_meaningful() {
+        analysis.products.push(product);
+    }
     if let Ok(rows) = package.select_rows(Select::table("File")) {
         for row in rows {
             if !budget.can_enter(1) {
@@ -1232,12 +1281,14 @@ fn analyze_msi(
             Severity::Info
         };
         let signed = sign_status(&bytes);
+        let stored_path = if nesting_path.is_empty() {
+            name.clone()
+        } else {
+            format!("{nesting_path}/{name}")
+        };
+        record_pe_product(&bytes, &stored_path, analysis);
         analysis.components.push(ComponentEvidence {
-            nesting_path: if nesting_path.is_empty() {
-                name.clone()
-            } else {
-                format!("{nesting_path}/{name}")
-            },
+            nesting_path: stored_path,
             name,
             size: bytes.len() as u64,
             sha256: Some(hex::encode(Sha256::digest(&bytes))),
@@ -1332,6 +1383,7 @@ fn analyze_nsis(
             Severity::Info
         };
         let signed = sign_status(&member);
+        record_pe_product(&member, &child_path, analysis);
         analysis.components.push(ComponentEvidence {
             nesting_path: child_path,
             name,
@@ -1368,6 +1420,12 @@ fn analyze_inno(
         .app_name()
         .unwrap_or("<unnamed>")
         .to_string();
+    analysis.products.push(ProductIdentityEvidence {
+        product_name: metadata_value(Some(&app_name)),
+        source: "Inno Setup application metadata".into(),
+        nesting_path: (!nesting_path.is_empty()).then(|| nesting_path.to_string()),
+        ..ProductIdentityEvidence::default()
+    });
     analysis.inference.push(evidence(
         "inno:app-name",
         "installer_identity",
@@ -1428,12 +1486,14 @@ fn analyze_inno(
             Severity::Info
         };
         let signed = sign_status(&member);
+        let child_path = if nesting_path.is_empty() {
+            name.clone()
+        } else {
+            format!("{nesting_path}/{name}")
+        };
+        record_pe_product(&member, &child_path, analysis);
         analysis.components.push(ComponentEvidence {
-            nesting_path: if nesting_path.is_empty() {
-                name.clone()
-            } else {
-                format!("{nesting_path}/{name}")
-            },
+            nesting_path: child_path,
             name,
             size: member.len() as u64,
             sha256: Some(hex::encode(Sha256::digest(&member))),
@@ -1813,6 +1873,25 @@ fn parse_certificate(der: &[u8]) -> (String, String, String, Vec<String>, Vec<St
     }
 }
 
+fn certificate_usage(der: &[u8]) -> (bool, bool) {
+    let Ok((_, certificate)) = X509Certificate::from_der(der) else {
+        return (false, false);
+    };
+    let Ok(Some(usage)) = certificate.extended_key_usage() else {
+        return (false, false);
+    };
+    (usage.value.code_signing, usage.value.time_stamping)
+}
+
+fn select_publisher(leaf_candidates: &[(String, bool, bool)]) -> Option<String> {
+    leaf_candidates
+        .iter()
+        .find(|(_, code_signing, time_stamping)| *code_signing && !*time_stamping)
+        .or_else(|| leaf_candidates.iter().find(|(_, _, timestamp)| !timestamp))
+        .or_else(|| leaf_candidates.first())
+        .map(|(subject, _, _)| subject.clone())
+}
+
 fn extract_urls(data: &[u8]) -> Vec<String> {
     let mut urls = Vec::new();
     for scheme in [b"https://".as_slice(), b"http://".as_slice()] {
@@ -1904,6 +1983,80 @@ fn sign_status(data: &[u8]) -> Option<bool> {
         return None;
     }
     Some(pe_has_signature_table(data))
+}
+
+fn record_pe_product(data: &[u8], nesting_path: &str, analysis: &mut ChildAnalysis) {
+    if let Some(product) = pe_product_identity(data, Some(nesting_path.to_string())) {
+        analysis.products.push(product);
+    }
+}
+
+fn pe_product_identity(
+    data: &[u8],
+    nesting_path: Option<String>,
+) -> Option<ProductIdentityEvidence> {
+    let pe = goblin::pe::PE::parse(data).ok()?;
+    let version = pe.resource_data?.version_info?;
+    let strings = version.string_info;
+    let product = ProductIdentityEvidence {
+        product_name: metadata_value(strings.product_name().as_deref()),
+        manufacturer: metadata_value(strings.company_name().as_deref()),
+        product_version: metadata_value(strings.product_version().as_deref()).or_else(|| {
+            version
+                .fixed_info
+                .map(|fixed| fixed.product_version().to_string())
+                .and_then(|value| metadata_value(Some(&value)))
+        }),
+        original_filename: metadata_value(strings.original_filename().as_deref()),
+        file_description: metadata_value(strings.file_description().as_deref()),
+        legal_copyright: metadata_value(strings.legal_copyright().as_deref()),
+        source: "PE version information".into(),
+        nesting_path,
+        ..ProductIdentityEvidence::default()
+    };
+    product.is_meaningful().then_some(product)
+}
+
+fn metadata_value(value: Option<&str>) -> Option<String> {
+    value
+        .map(escape_component_name)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn note_product_identity_mismatch(
+    path: &Path,
+    product: &ProductIdentityEvidence,
+    analysis: &mut ChildAnalysis,
+) {
+    let Some(downloaded_name) = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(escape_component_name)
+    else {
+        return;
+    };
+    let Some(original_name) = product.original_filename.as_deref() else {
+        return;
+    };
+    if downloaded_name.eq_ignore_ascii_case(original_name) {
+        return;
+    }
+    let product_name = product.product_name.as_deref().unwrap_or("not declared");
+    let manufacturer = product.manufacturer.as_deref().unwrap_or("not declared");
+    analysis.facts.push(Evidence {
+        id: "identity:filename-mismatch".into(),
+        category: "product_identity".into(),
+        severity: Severity::Medium,
+        summary: format!(
+            "Downloaded file name {downloaded_name} differs from embedded original filename {original_name}"
+        ),
+        detail: Some(format!(
+            "Declared product: {product_name}; declared manufacturer: {manufacturer}"
+        )),
+        provenance: "child PE version resource".into(),
+        confidence: Confidence::Structural,
+    });
 }
 
 fn evidence(
@@ -2011,6 +2164,40 @@ mod tests {
                 .iter()
                 .any(|fact| fact.category == "network_endpoint")
         );
+    }
+
+    #[test]
+    fn renamed_installer_identity_mismatch_is_reported() {
+        let product = ProductIdentityEvidence {
+            product_name: Some("Microsoft SQL Server 2014".into()),
+            manufacturer: Some("Microsoft Corporation".into()),
+            original_filename: Some("SqlSetupBootstrapper.exe".into()),
+            ..ProductIdentityEvidence::default()
+        };
+        let mut analysis = ChildAnalysis::default();
+        note_product_identity_mismatch(Path::new("ddu-18.1.6.0.exe"), &product, &mut analysis);
+        let evidence = analysis
+            .facts
+            .iter()
+            .find(|fact| fact.category == "product_identity")
+            .expect("identity mismatch should be reported");
+        assert!(evidence.summary.contains("ddu-18.1.6.0.exe"));
+        assert!(evidence.summary.contains("SqlSetupBootstrapper.exe"));
+        assert!(
+            evidence
+                .detail
+                .as_deref()
+                .is_some_and(|detail| { detail.contains("Microsoft SQL Server 2014") })
+        );
+    }
+
+    #[test]
+    fn code_signing_owner_is_preferred_over_timestamp_responder() {
+        let candidates = vec![
+            ("DigiCert Timestamp Responder".into(), false, true),
+            ("Google LLC".into(), true, false),
+        ];
+        assert_eq!(select_publisher(&candidates).as_deref(), Some("Google LLC"));
     }
 
     #[test]

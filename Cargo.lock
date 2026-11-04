@@ -2834,6 +2834,7 @@ dependencies = [
  "der",
  "eframe",
  "egui_extras",
+ "goblin",
  "hex",
  "inno",
  "msi",

@@ -14,7 +14,8 @@ use crate::config::{AppPaths, Config};
 use crate::db::Database;
 use crate::interaction::validate_download_file_name;
 use crate::report::{
-    AnalysisReportV1, BoundaryKind, ComponentEvidence, ReputationState, Severity, Verdict,
+    AnalysisReportV1, BoundaryKind, ComponentEvidence, ProductIdentityEvidence, ReputationState,
+    Severity, Verdict,
 };
 
 use super::actions::Worker;
@@ -673,6 +674,24 @@ impl DesktopApp {
                         }
                     });
 
+                if !report.products.is_empty() {
+                    ui.add_space(10.0);
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!(
+                            "Detected software identity ({})",
+                            report.products.len()
+                        ))
+                        .strong()
+                        .color(TEXT),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for product in &report.products {
+                            render_product_identity(ui, product);
+                        }
+                    });
+                }
+
                 ui.add_space(14.0);
                 egui::CollapsingHeader::new(
                     RichText::new("Reasons and policy").strong().color(TEXT),
@@ -1197,6 +1216,53 @@ fn render_component(ui: &mut egui::Ui, component: &ComponentEvidence) {
         });
 }
 
+fn render_product_identity(ui: &mut egui::Ui, product: &ProductIdentityEvidence) {
+    Frame::new()
+        .fill(PANEL_ALT)
+        .stroke(Stroke::new(1.0, LINE))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(9, 7))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(
+                    product
+                        .product_name
+                        .as_deref()
+                        .unwrap_or("<unnamed product>"),
+                )
+                .size(12.0)
+                .strong()
+                .color(TEXT),
+            );
+            key_value(
+                ui,
+                "Manufacturer",
+                product.manufacturer.as_deref().unwrap_or("not declared"),
+            );
+            if let Some(version) = &product.product_version {
+                key_value(ui, "Version", version);
+            }
+            if let Some(original) = &product.original_filename {
+                key_value(ui, "Original filename", original);
+            }
+            if let Some(description) = &product.file_description {
+                key_value(ui, "File description", description);
+            }
+            if let Some(code) = &product.product_code {
+                key_value(ui, "Product code", code);
+            }
+            if let Some(copyright) = &product.legal_copyright {
+                key_value(ui, "Copyright", copyright);
+            }
+            key_value(
+                ui,
+                "Evidence source",
+                product.nesting_path.as_deref().unwrap_or(&product.source),
+            );
+        });
+    ui.add_space(5.0);
+}
+
 fn render_reputation(ui: &mut egui::Ui, report: &AnalysisReportV1) {
     if report.reputation.is_empty() {
         ui.label(RichText::new("No reputation lookup was recorded.").color(MUTED));
@@ -1231,7 +1297,7 @@ fn render_reputation(ui: &mut egui::Ui, report: &AnalysisReportV1) {
         ui.add_space(5.0);
         key_value(
             ui,
-            "Publisher",
+            "Certificate owner",
             authenticity
                 .publisher_identity
                 .as_deref()

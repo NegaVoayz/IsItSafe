@@ -493,6 +493,8 @@ impl Watcher {
         deduplicate_evidence(&mut report.inference);
         report.boundaries.extend(child.boundaries);
         report.components.extend(child.components);
+        report.products.extend(child.products);
+        deduplicate_products(&mut report.products);
         report.certificates.extend(child.certificates);
         if child.authenticity.is_some() {
             report.authenticity = child.authenticity;
@@ -934,6 +936,38 @@ fn human_report(report: &AnalysisReportV1) -> String {
             component.nesting_path, component.size, component.severity
         ));
     }
+    if !report.products.is_empty() {
+        output.push_str("Detected software identity (declared by the installer):\n");
+        for product in report.products.iter().take(24) {
+            let name = product
+                .product_name
+                .as_deref()
+                .unwrap_or("<unnamed product>");
+            let manufacturer = product
+                .manufacturer
+                .as_deref()
+                .unwrap_or("unknown manufacturer");
+            let version = product
+                .product_version
+                .as_deref()
+                .map(|value| format!(", version {value}"))
+                .unwrap_or_default();
+            let source = product
+                .nesting_path
+                .as_deref()
+                .unwrap_or(product.source.as_str());
+            output.push_str(&format!(
+                "  {name} ({manufacturer}{version}) from {source}\n"
+            ));
+        }
+    }
+    if let Some(owner) = report
+        .authenticity
+        .as_ref()
+        .and_then(|authenticity| authenticity.publisher_identity.as_deref())
+    {
+        output.push_str(&format!("Certificate owner: {owner}\n"));
+    }
     if !report.components.is_empty() {
         let names = report
             .components
@@ -979,6 +1013,20 @@ fn deduplicate_evidence(evidence: &mut Vec<crate::report::Evidence>) {
             item.category.clone(),
             item.summary.clone(),
             item.detail.clone(),
+        ))
+    });
+}
+
+fn deduplicate_products(products: &mut Vec<crate::report::ProductIdentityEvidence>) {
+    let mut seen = std::collections::HashSet::new();
+    products.retain(|product| {
+        seen.insert((
+            product.nesting_path.clone(),
+            product.source.clone(),
+            product.product_name.clone(),
+            product.manufacturer.clone(),
+            product.product_version.clone(),
+            product.product_code.clone(),
         ))
     });
 }

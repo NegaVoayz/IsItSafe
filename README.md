@@ -9,6 +9,7 @@ IsItSafe watches a Windows download directory and reports what a downloaded file
 - The child has no network capability and receives source bytes through an inherited pipe.
 - VirusTotal, Windows Authenticode trust evaluation, and rule updates run only in the parent.
 - Archive members are decompressed into bounded memory, analyzed, hashed, and discarded. They are never written to disk or executed.
+- PE version resources and MSI/Inno metadata expose the declared product name, manufacturer, version, original filename, and certificate owner separately from the download filename.
 - ZIP and RAR4/RAR5 containers are scanned recursively. RAR decoding is performed by the in-process `rar-codec` library rather than an external extractor.
 - Files are considered ready only after an exclusive write-readiness handle has been acquired. Timeouts and protected volumes produce `Incomplete`.
 - `BasicCheckOnly` files above 2 GiB receive streaming SHA-256, magic/trailer inspection, MOTW/ADS inspection, and VirusTotal hash lookup without unpacking.
@@ -47,7 +48,8 @@ API key.
 The installed package includes `isitsafe-ui.exe`, a native eframe/egui Windows
 application. It has a Review page for questionable downloads, a Quarantine page
 with hash-verified restore actions, and a stored component-inventory view that
-highlights risky embedded files. Its custom captionless title strip provides
+shows detected software identities and highlights risky embedded files. Its
+custom captionless title strip provides
 drag, minimize, maximize/restore, and close controls. The UI reads the local
 SQLite state directly and does not start an HTTP server or require WebView2.
 Run `isitsafe-ui.exe --background` to start the monitor without opening a
