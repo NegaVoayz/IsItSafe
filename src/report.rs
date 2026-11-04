@@ -176,6 +176,9 @@ fn concise_reasons(report: &AnalysisReportV1) -> Vec<String> {
     }
     reasons.truncate(4);
     reasons
+        .into_iter()
+        .map(|reason| sanitize_visible_text(&reason))
+        .collect()
 }
 
 fn push_unique(reasons: &mut Vec<String>, value: String) {
@@ -188,6 +191,19 @@ fn push_unique(reasons: &mut Vec<String>, value: String) {
         return;
     }
     reasons.push(value.to_string());
+}
+
+fn sanitize_visible_text(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|character| match character {
+            '\n' => "\\n".chars().collect::<Vec<_>>(),
+            '\r' => "\\r".chars().collect(),
+            '\t' => "\\t".chars().collect(),
+            value if value.is_control() => format!("\\u{{{:x}}}", value as u32).chars().collect(),
+            value => vec![value],
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

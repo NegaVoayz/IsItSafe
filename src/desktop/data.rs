@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 
+use crate::capture::escape_controls;
 use crate::config::{AppPaths, Config};
 use crate::db::{Database, normalize_path};
 use crate::report::{ReportSummary, Severity, Verdict};
@@ -105,7 +106,12 @@ pub fn load_snapshot(
 ) -> Result<DesktopSnapshot> {
     let summaries = database.latest_report_summaries()?;
     let mut questionable = Vec::new();
-    for summary in summaries {
+    for mut summary in summaries {
+        summary.reasons = summary
+            .reasons
+            .into_iter()
+            .map(|reason| escape_controls(&reason))
+            .collect();
         if summary.user_decision.is_some() || summary.verdict == Verdict::NoHighRiskFound {
             continue;
         }

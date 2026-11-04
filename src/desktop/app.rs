@@ -19,9 +19,7 @@ use crate::report::{
 
 use super::actions::Worker;
 use super::actions::{WorkerEvent, WorkerRequest};
-use super::data::{
-    DesktopSnapshot, RiskGroup, format_size, most_risky_component_first, severity_label,
-};
+use super::data::{DesktopSnapshot, RiskGroup, format_size, severity_label};
 
 const CANVAS: Color32 = Color32::from_rgb(12, 16, 15);
 const PANEL: Color32 = Color32::from_rgb(21, 28, 25);
@@ -155,9 +153,7 @@ impl DesktopApp {
                         self.busy = false;
                         match result {
                             Ok(Some(report)) => {
-                                let mut report = *report;
-                                most_risky_component_first(&mut report.components);
-                                self.selected_report = Some(report);
+                                self.selected_report = Some(*report);
                             }
                             Ok(None) => {
                                 self.status = Some(StatusMessage {
