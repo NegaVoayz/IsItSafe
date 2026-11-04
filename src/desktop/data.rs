@@ -191,6 +191,12 @@ pub fn severity_label(severity: Severity) -> &'static str {
 pub fn compact_reason(reason: &str) -> String {
     let lower = reason.to_ascii_lowercase();
     if lower.contains("virustotal") {
+        if lower.contains("reported one or more malicious") {
+            return "VirusTotal: malicious".into();
+        }
+        if lower.contains("reported suspicious") {
+            return "VirusTotal: suspicious".into();
+        }
         let detections = reason
             .split_whitespace()
             .find(|part| {
@@ -231,6 +237,9 @@ pub fn compact_reason(reason: &str) -> String {
     }
     if lower.contains("exceeded") && lower.contains("threshold") {
         return "Too large for deep scan".into();
+    }
+    if lower.contains("snapshot_max_bytes") || lower.contains("basic_check_threshold_bytes") {
+        return String::new();
     }
     if lower.contains("temporary download") {
         return "Incomplete download".into();
@@ -361,6 +370,10 @@ mod tests {
             "VirusTotal 3/93"
         );
         assert_eq!(
+            compact_reason("VirusTotal reported one or more malicious detections"),
+            "VirusTotal: malicious"
+        );
+        assert_eq!(
             compact_reason(
                 "Downloaded file name ddu.exe differs from embedded original filename SqlSetupBootstrapper.exe"
             ),
@@ -373,6 +386,10 @@ mod tests {
         assert_eq!(
             compact_reason("The file exceeded a deep-analysis resource threshold"),
             "Too large for deep scan"
+        );
+        assert_eq!(
+            compact_reason("file exceeds snapshot_max_bytes (536870912)"),
+            ""
         );
     }
 
