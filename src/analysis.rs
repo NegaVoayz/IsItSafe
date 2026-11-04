@@ -702,12 +702,44 @@ fn analyze_archive_member(
     let sniff = detect::sniff(&member_path, head, tail, member.len() as u64);
     let mut child_evidence = sniff.evidence;
     let child_classification = sniff.classification.clone();
+    if is_ooxml_macro_part(child_path) {
+        child_evidence.push(evidence(
+            format!("ooxml:macro:{}", child_path),
+            "ooxml_macro",
+            Severity::High,
+            "Office package contains a VBA macro project",
+            "child OOXML package inventory",
+            Confidence::Structural,
+        ));
+    }
+    if is_ooxml_external_link_part(child_path) {
+        child_evidence.push(evidence(
+            format!("ooxml:external-link:{}", child_path),
+            "ooxml_external_link",
+            Severity::High,
+            "Office package contains an external-link part",
+            "child OOXML package inventory",
+            Confidence::Structural,
+        ));
+    }
+    if is_ooxml_activex_part(child_path) {
+        child_evidence.push(evidence(
+            format!("ooxml:activex:{}", child_path),
+            "ooxml_activex",
+            Severity::High,
+            "Office package contains an ActiveX part",
+            "child OOXML package inventory",
+            Confidence::Structural,
+        ));
+    }
     let mut feature_analysis = ChildAnalysis {
         classification: child_classification.clone(),
         ..ChildAnalysis::default()
     };
     inspect_document_features(member, &child_classification, &mut feature_analysis);
-    inspect_scripts(&member_path, member, &mut feature_analysis);
+    if !is_ooxml_package_part(child_path) {
+        inspect_scripts(&member_path, member, &mut feature_analysis);
+    }
     child_evidence.extend(feature_analysis.facts);
     let hash = hex::encode(Sha256::digest(member));
     let signed = sign_status(member);
@@ -1445,7 +1477,7 @@ fn inspect_document_features(
             "/OpenAction",
             "/AA",
         ] {
-            if contains_ascii(data, marker.as_bytes()) {
+            if pdf_marker_present(data, marker.as_bytes()) {
                 let severity = if matches!(marker, "/JavaScript" | "/JS" | "/Launch") {
                     Severity::High
                 } else {
@@ -1527,6 +1559,60 @@ fn inspect_document_features(
     }
 }
 
+fn pdf_marker_present(data: &[u8], marker: &[u8]) -> bool {
+    let stream_ranges = detect::pdf_stream_ranges(data);
+    let mut cursor = 0usize;
+    while let Some(relative) = data[cursor..]
+        .windows(marker.len())
+        .position(|window| window == marker)
+    {
+        let offset = cursor + relative;
+        if !stream_ranges
+            .iter()
+            .any(|(start, end)| offset as u64 >= *start && (offset as u64) < *end)
+        {
+            return true;
+        }
+        cursor = offset.saturating_add(marker.len());
+        if cursor >= data.len() {
+            break;
+        }
+    }
+    false
+}
+
+fn is_ooxml_package_part(path: &str) -> bool {
+    let path = path.replace('\\', "/").to_ascii_lowercase();
+    path == "[content_types].xml"
+        || path.starts_with("_rels/")
+        || path.starts_with("docprops/")
+        || path.starts_with("customxml/")
+        || path.starts_with("word/")
+        || path.starts_with("xl/")
+        || path.starts_with("ppt/")
+        || path.contains("/_rels/")
+        || path.contains("/docprops/")
+        || path.contains("/customxml/")
+        || path.contains("/word/")
+        || path.contains("/xl/")
+        || path.contains("/ppt/")
+}
+
+fn is_ooxml_macro_part(path: &str) -> bool {
+    let path = path.replace('\\', "/").to_ascii_lowercase();
+    path == "vbaproject.bin" || path.ends_with("/vbaproject.bin")
+}
+
+fn is_ooxml_external_link_part(path: &str) -> bool {
+    let path = path.replace('\\', "/").to_ascii_lowercase();
+    path.starts_with("externallinks/") || path.contains("/externallinks/")
+}
+
+fn is_ooxml_activex_part(path: &str) -> bool {
+    let path = path.replace('\\', "/").to_ascii_lowercase();
+    path.starts_with("activex/") || path.contains("/activex/")
+}
+
 fn inspect_scripts(path: &Path, data: &[u8], analysis: &mut ChildAnalysis) {
     let extension = path
         .extension()
@@ -1545,68 +1631,70 @@ fn inspect_scripts(path: &Path, data: &[u8], analysis: &mut ChildAnalysis) {
         return;
     }
     let text = String::from_utf8_lossy(data).to_ascii_lowercase();
-    let checks = [
-        (
-            "download",
-            &["invoke-webrequest", "wget ", "curl ", "bitsadmin"][..],
-            Severity::High,
-        ),
-        (
-            "execution",
-            &[
-                "start-process",
-                "invoke-expression",
-                "iex(",
-                "wscript.shell",
-            ][..],
-            Severity::High,
-        ),
-        (
-            "evasion",
-            &["-enc", "frombase64string", "hidden"][..],
-            Severity::Medium,
-        ),
-        (
-            "persistence",
-            &["schtasks", "currentversion\\run", "new-service"][..],
-            Severity::High,
-        ),
-        (
-            "remote_access",
-            &["reverse shell", "tcpclient", "connect(", "listener"][..],
-            Severity::High,
-        ),
-        (
-            "credential_material",
-            &["password=", "passwd=", "api_key=", "token="][..],
-            Severity::High,
-        ),
-    ];
-    for (category, needles, severity) in checks {
-        if needles.iter().any(|needle| text.contains(needle)) {
+    if script {
+        let checks = [
+            (
+                "download",
+                &["invoke-webrequest", "wget ", "curl ", "bitsadmin"][..],
+                Severity::High,
+            ),
+            (
+                "execution",
+                &[
+                    "start-process",
+                    "invoke-expression",
+                    "iex(",
+                    "wscript.shell",
+                ][..],
+                Severity::High,
+            ),
+            (
+                "evasion",
+                &["-enc", "frombase64string", "hidden"][..],
+                Severity::Medium,
+            ),
+            (
+                "persistence",
+                &["schtasks", "currentversion\\run", "new-service"][..],
+                Severity::High,
+            ),
+            (
+                "remote_access",
+                &["reverse shell", "tcpclient", "connect(", "listener"][..],
+                Severity::High,
+            ),
+            (
+                "credential_material",
+                &["password=", "passwd=", "api_key=", "token="][..],
+                Severity::High,
+            ),
+        ];
+        for (category, needles, severity) in checks {
+            if needles.iter().any(|needle| text.contains(needle)) {
+                analysis.facts.push(evidence(
+                    format!("script:{category}"),
+                    category,
+                    severity,
+                    format!("Script contains {category} behavior"),
+                    "child script scan",
+                    Confidence::Inferred,
+                ));
+            }
+        }
+        for url in extract_urls(data).into_iter().take(32) {
             analysis.facts.push(evidence(
-                format!("script:{category}"),
-                category,
-                severity,
-                format!("Script contains {category} behavior"),
-                "child script scan",
-                Confidence::Inferred,
+                format!("script:url:{}", analysis.facts.len()),
+                if text.contains("tcpclient") || text.contains("reverse shell") {
+                    "remote_access_endpoint"
+                } else {
+                    "network_endpoint"
+                },
+                Severity::Medium,
+                format!("Script references endpoint {url}"),
+                "child URL extraction",
+                Confidence::Structural,
             ));
         }
-    }
-    for url in extract_urls(data).into_iter().take(32) {
-        analysis.facts.push(evidence(
-            format!("script:url:{}", analysis.facts.len()),
-            if text.contains("tcpclient") || text.contains("reverse shell") {
-                "remote_access_endpoint"
-            } else {
-                "network_endpoint"
-            },
-            Severity::Medium,
-            format!("Script references endpoint {url}"),
-            "child URL extraction",
-            Confidence::Structural,
-        ));
     }
     if config_file {
         for needle in ["password=", "passwd=", "api_key=", "token=", "secret="] {
@@ -1937,6 +2025,74 @@ mod tests {
                 .facts
                 .iter()
                 .any(|fact| fact.category == "pdf_active_content")
+        );
+    }
+
+    #[test]
+    fn pdf_marker_text_inside_a_stream_is_not_active_content() {
+        let document = b"%PDF-1.7\n1 0 obj\n<< /Length 21 >>\nstream\nrandom data /JS noise\nendstream\nendobj\n%%EOF";
+        let analysis = analyze_bytes(Path::new("paper.pdf"), document, &limits());
+        assert!(
+            !analysis
+                .facts
+                .iter()
+                .any(|fact| fact.category == "pdf_active_content")
+        );
+    }
+
+    #[test]
+    fn ordinary_ooxml_parts_do_not_trigger_script_or_polyglot_findings() {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("[Content_Types].xml", options).unwrap();
+            std::io::Write::write_all(
+                &mut zip,
+                br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>"#,
+            )
+            .unwrap();
+            zip.start_file("ppt/slides/slide1.xml", options).unwrap();
+            std::io::Write::write_all(
+                &mut zip,
+                br#"<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><a:t>clientSocket.connect((serverName, serverPort))</a:t><a:t>Transport layer listener</a:t></p:sld>"#,
+            )
+            .unwrap();
+            zip.start_file("ppt/slides/_rels/slide1.xml.rels", options)
+                .unwrap();
+            std::io::Write::write_all(
+                &mut zip,
+                br#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#,
+            )
+            .unwrap();
+            zip.finish().unwrap();
+        }
+
+        let analysis = analyze_bytes(Path::new("lecture.pptx"), bytes.get_ref(), &limits());
+        assert!(!analysis.facts.iter().any(|fact| {
+            fact.severity >= Severity::High
+                || fact.category == "polyglot"
+                || fact.category == "extension_mismatch"
+        }));
+    }
+
+    #[test]
+    fn ooxml_macro_parts_remain_high_severity() {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut bytes);
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("word/vbaProject.bin", options).unwrap();
+            std::io::Write::write_all(&mut zip, b"macro project").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let analysis = analyze_bytes(Path::new("macro-enabled.docx"), bytes.get_ref(), &limits());
+        assert!(
+            analysis
+                .facts
+                .iter()
+                .any(|fact| fact.category == "ooxml_macro" && fact.severity == Severity::High)
         );
     }
 

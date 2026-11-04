@@ -1,4 +1,8 @@
+use std::collections::HashSet;
+use std::io::Cursor;
 use std::path::Path;
+
+use zip::ZipArchive;
 
 use crate::report::{Classification, Confidence, DetectedFormat, Evidence, Severity};
 
@@ -28,8 +32,15 @@ pub fn sniff(path: &Path, head: &[u8], tail: &[u8], total_size: u64) -> SniffRes
             formats.push(format_hit("msi", 0, "cfb-msi-marker"));
         }
     }
-    if is_zip_head(head) || find_zip_eocd(tail).is_some() {
+    let zip_at_head = is_zip_head(head);
+    if zip_at_head {
         formats.push(format_hit("zip", 0, "zip-eocd"));
+    } else if let Some(eocd) = find_zip_eocd(tail) {
+        let zip_start = tail[..eocd]
+            .windows(4)
+            .rposition(|window| window == b"PK\x03\x04")
+            .unwrap_or(eocd);
+        formats.push(format_hit("zip", tail_start + zip_start as u64, "zip-eocd"));
     }
     if head.starts_with(b"MSCF") {
         formats.push(format_hit("cab", 0, "cab-header"));
@@ -105,8 +116,15 @@ pub fn sniff(path: &Path, head: &[u8], tail: &[u8], total_size: u64) -> SniffRes
         formats.push(format_hit(script_kind, 0, "script-extension-or-shebang"));
     }
 
-    scan_embedded(head, 0, &mut formats);
-    scan_embedded(tail, tail_start, &mut formats);
+    if zip_at_head {
+        // Local headers from the container's own members are not embedded
+        // archives. Only inspect bytes following the end-of-central-directory
+        // record for a second, appended archive.
+        scan_zip_trailing_data(tail, tail_start, &mut formats);
+    } else {
+        scan_embedded(head, 0, &mut formats);
+        scan_embedded(tail, tail_start, &mut formats);
+    }
     formats.sort_by(|a, b| a.offset.cmp(&b.offset).then(a.kind.cmp(&b.kind)));
     formats.dedup_by(|a, b| a.kind == b.kind && a.offset == b.offset);
 
@@ -212,13 +230,29 @@ pub fn sniff(path: &Path, head: &[u8], tail: &[u8], total_size: u64) -> SniffRes
 
 pub fn scan_all(data: &[u8]) -> Vec<DetectedFormat> {
     let mut out = Vec::new();
-    scan_embedded(data, 0, &mut out);
+    let zip_headers = zip_local_header_offsets(data);
+    let pdf_streams = if data.starts_with(b"%PDF-") {
+        pdf_stream_ranges(data)
+    } else {
+        Vec::new()
+    };
+    scan_embedded_with_exclusions(data, 0, &zip_headers, &pdf_streams, &mut out);
     out.sort_by_key(|hit| hit.offset);
     out.dedup_by(|a, b| a.kind == b.kind && a.offset == b.offset);
     out
 }
 
 fn scan_embedded(data: &[u8], base: u64, out: &mut Vec<DetectedFormat>) {
+    scan_embedded_with_exclusions(data, base, &HashSet::new(), &[], out);
+}
+
+fn scan_embedded_with_exclusions(
+    data: &[u8],
+    base: u64,
+    skip_offsets: &HashSet<u64>,
+    hidden_ranges: &[(u64, u64)],
+    out: &mut Vec<DetectedFormat>,
+) {
     if data.is_empty() {
         return;
     }
@@ -241,7 +275,12 @@ fn scan_embedded(data: &[u8], base: u64, out: &mut Vec<DetectedFormat>) {
         {
             let offset = base + offset as u64;
             // A signature at zero is represented by the dedicated detector.
-            if offset == 0 {
+            if offset == 0
+                || skip_offsets.contains(&offset)
+                || hidden_ranges
+                    .iter()
+                    .any(|(start, end)| offset >= *start && offset < *end)
+            {
                 continue;
             }
             let candidate = &data[(offset - base) as usize..];
@@ -267,6 +306,85 @@ fn scan_embedded(data: &[u8], base: u64, out: &mut Vec<DetectedFormat>) {
             }
         }
     }
+}
+
+fn zip_local_header_offsets(data: &[u8]) -> HashSet<u64> {
+    let mut offsets = HashSet::new();
+    if !is_zip_head(data) {
+        return offsets;
+    }
+    let Ok(mut archive) = ZipArchive::new(Cursor::new(data)) else {
+        return offsets;
+    };
+    for index in 0..archive.len() {
+        if let Ok(entry) = archive.by_index_raw(index) {
+            offsets.insert(entry.header_start());
+        }
+    }
+    offsets
+}
+
+pub(crate) fn pdf_stream_ranges(data: &[u8]) -> Vec<(u64, u64)> {
+    const STREAM: &[u8] = b"stream";
+    const END_STREAM: &[u8] = b"endstream";
+    let mut ranges = Vec::new();
+    let mut cursor = 0usize;
+    while let Some(relative) = data[cursor..]
+        .windows(STREAM.len())
+        .position(|window| window == STREAM)
+    {
+        let start = cursor + relative;
+        let before_is_token = start == 0 || !is_pdf_name_byte(data[start - 1]);
+        let after = start + STREAM.len();
+        let after_is_token = data.get(after).is_none_or(|byte| !is_pdf_name_byte(*byte));
+        if !before_is_token || !after_is_token {
+            cursor = after;
+            continue;
+        }
+        let payload_start = match data.get(after..) {
+            Some([b'\r', b'\n', ..]) => after + 2,
+            Some([b'\n', ..]) | Some([b'\r', ..]) => after + 1,
+            _ => {
+                // "stream" is also ordinary prose. In PDF syntax a stream
+                // payload starts on the next line.
+                cursor = after;
+                continue;
+            }
+        };
+        let payload_end = data[payload_start..]
+            .windows(END_STREAM.len())
+            .position(|window| window == END_STREAM)
+            .map(|offset| payload_start + offset)
+            .unwrap_or(data.len());
+        ranges.push((payload_start as u64, payload_end as u64));
+        cursor = payload_end.saturating_add(END_STREAM.len()).min(data.len());
+        if cursor >= data.len() {
+            break;
+        }
+    }
+    ranges
+}
+
+fn is_pdf_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-')
+}
+
+fn scan_zip_trailing_data(tail: &[u8], tail_start: u64, formats: &mut Vec<DetectedFormat>) {
+    let Some(eocd) = find_zip_eocd(tail) else {
+        return;
+    };
+    let Some(record_end) = eocd
+        .checked_add(22)
+        .and_then(|fixed_end| {
+            let comment_len =
+                u16::from_le_bytes(tail.get(eocd + 20..eocd + 22)?.try_into().ok()?) as usize;
+            fixed_end.checked_add(comment_len)
+        })
+        .filter(|end| *end < tail.len())
+    else {
+        return;
+    };
+    scan_embedded(&tail[record_end..], tail_start + record_end as u64, formats);
 }
 
 fn is_plausible_zip(data: &[u8]) -> bool {
@@ -406,6 +524,7 @@ fn extension_mismatch(extension: &str, primary: &str) -> bool {
                 | "frag"
                 | "vert"
                 | "obj"
+                | "rels"
         );
     }
     let compatible: &[&str] = match extension {
@@ -427,6 +546,7 @@ fn extension_mismatch(extension: &str, primary: &str) -> bool {
         "js" => &["javascript", "script"],
         "hta" => &["hta", "script"],
         "md" | "markdown" | "txt" => &["text", "unknown"],
+        "rels" => &["text", "unknown"],
         "py" | "pyw" | "utf8" | "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "sln" | "vcxproj"
         | "filters" | "comp" | "frag" | "vert" | "obj" => &["text", "unknown", "script", "python"],
         _ => return false,
@@ -553,6 +673,66 @@ mod tests {
 
         let hits = scan_all(bytes.get_ref());
         assert!(!hits.iter().any(|hit| hit.kind == "zip" && hit.offset > 0));
+    }
+
+    #[test]
+    fn all_local_headers_of_a_valid_zip_belong_to_the_outer_archive() {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut bytes);
+            for index in 0..40 {
+                let options = zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated);
+                zip.start_file(format!("ppt/slides/slide{index}.xml"), options)
+                    .unwrap();
+                std::io::Write::write_all(
+                    &mut zip,
+                    format!("<p:sld><a:t>{index}</a:t></p:sld>").as_bytes(),
+                )
+                .unwrap();
+            }
+            zip.finish().unwrap();
+        }
+
+        let hits = scan_all(bytes.get_ref());
+        assert!(!hits.iter().any(|hit| hit.kind == "zip"));
+    }
+
+    #[test]
+    fn pdf_stream_payload_is_not_mistaken_for_embedded_formats() {
+        let mut pdf = b"%PDF-1.7\n1 0 obj\n<< /Length 17 >>\nstream\n".to_vec();
+        pdf.extend_from_slice(b"random /JS PK\x03\x04 bytes");
+        pdf.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
+
+        let hits = scan_all(&pdf);
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn finds_zip_appended_outside_pdf_stream_data() {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut bytes);
+            zip.start_file("payload.txt", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            std::io::Write::write_all(&mut zip, b"hello").unwrap();
+            zip.finish().unwrap();
+        }
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        pdf.extend_from_slice(bytes.get_ref());
+        pdf.extend_from_slice(b"\n%%EOF");
+
+        let hits = scan_all(&pdf);
+        assert!(
+            hits.iter().any(|hit| hit.kind == "zip" && hit.offset > 0),
+            "hits={hits:?}, streams={:?}",
+            pdf_stream_ranges(&pdf)
+        );
+    }
+
+    #[test]
+    fn office_relationship_extensions_are_recognized_as_text() {
+        assert!(!extension_mismatch("rels", "unknown"));
     }
 
     #[test]
