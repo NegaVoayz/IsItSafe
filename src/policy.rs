@@ -133,7 +133,6 @@ pub fn evaluate(report: &mut AnalysisReportV1, config: &Config) {
                     | "lnk"
                     | "svg"
             ) || format.kind.starts_with("installer:")
-                || format.kind.starts_with("ooxml:")
         });
 
     if confirmed_malicious {
@@ -545,7 +544,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::report::{AnalysisReportV1, FileEvidence, ReputationEvidence, VtBatch};
+    use crate::report::{
+        AnalysisReportV1, Confidence, DetectedFormat, Evidence, FileEvidence, ReputationEvidence,
+        VtBatch,
+    };
 
     #[test]
     fn vt_malicious_is_terminal() {
@@ -566,6 +568,69 @@ mod tests {
         assert_eq!(report.verdict, Verdict::Malicious);
         assert_eq!(report.policy.action, PolicyAction::Quarantine);
         assert_ne!(report.report_id, Uuid::nil());
+    }
+
+    #[test]
+    fn ordinary_ooxml_does_not_require_a_network_verdict() {
+        let mut report = AnalysisReportV1::new(FileEvidence::default());
+        report.classification.formats.push(DetectedFormat {
+            kind: "ooxml:pptx".into(),
+            offset: 0,
+            confidence: Confidence::Structural,
+            parser: "ooxml".into(),
+        });
+        report.reputation.push(ReputationEvidence {
+            sha256: "a".repeat(64),
+            state: ReputationState::NotQueried,
+            vt_batch: None,
+            used_by_batch: Vec::new(),
+            detections: None,
+            engines_total: None,
+            checked_at: None,
+            signature_info: Vec::new(),
+            detail: Some("no pre-child VirusTotal trigger applied".into()),
+        });
+
+        evaluate(&mut report, &Config::default());
+
+        assert_eq!(report.verdict, Verdict::NoHighRiskFound);
+        assert_eq!(report.policy.action, PolicyAction::NoAction);
+    }
+
+    #[test]
+    fn active_ooxml_content_remains_high_risk_without_a_network_verdict() {
+        let mut report = AnalysisReportV1::new(FileEvidence::default());
+        report.classification.formats.push(DetectedFormat {
+            kind: "ooxml:docm".into(),
+            offset: 0,
+            confidence: Confidence::Structural,
+            parser: "ooxml".into(),
+        });
+        report.facts.push(Evidence {
+            id: "ooxml:macro".into(),
+            category: "ooxml_macro".into(),
+            severity: Severity::High,
+            summary: "Office package contains a VBA macro project".into(),
+            detail: None,
+            provenance: "child OOXML package inventory".into(),
+            confidence: Confidence::Structural,
+        });
+        report.reputation.push(ReputationEvidence {
+            sha256: "a".repeat(64),
+            state: ReputationState::NotQueried,
+            vt_batch: None,
+            used_by_batch: Vec::new(),
+            detections: None,
+            engines_total: None,
+            checked_at: None,
+            signature_info: Vec::new(),
+            detail: Some("no pre-child VirusTotal trigger applied".into()),
+        });
+
+        evaluate(&mut report, &Config::default());
+
+        assert_eq!(report.verdict, Verdict::Suspicious);
+        assert_eq!(report.policy.action, PolicyAction::RequireReview);
     }
 
     #[test]
