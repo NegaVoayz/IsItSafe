@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use crate::capture::escape_controls;
 use crate::config::{AppPaths, Config};
 use crate::db::{Database, normalize_path};
-use crate::report::{ReportSummary, Severity, Verdict};
+use crate::report::{AnalysisReportV1, ReportSummary, Severity, Verdict};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RiskGroup {
@@ -188,6 +188,34 @@ pub fn severity_label(severity: Severity) -> &'static str {
     }
 }
 
+pub fn reputation_subject(report: &AnalysisReportV1, sha256: &str) -> String {
+    if report
+        .file
+        .sha256
+        .as_deref()
+        .is_some_and(|hash| hash.eq_ignore_ascii_case(sha256))
+    {
+        return format!(
+            "Download file: {}",
+            Path::new(&report.file.display_path)
+                .file_name()
+                .map_or_else(
+                    || report.file.display_path.clone(),
+                    |name| name.to_string_lossy().into_owned()
+                )
+        );
+    }
+    if let Some(component) = report.components.iter().find(|component| {
+        component
+            .sha256
+            .as_deref()
+            .is_some_and(|hash| hash.eq_ignore_ascii_case(sha256))
+    }) {
+        return format!("Inside: {}", component.nesting_path);
+    }
+    format!("Hash: {}...", &sha256[..sha256.len().min(12)])
+}
+
 pub fn compact_reason(reason: &str) -> String {
     let lower = reason.to_ascii_lowercase();
     if lower.contains("virustotal") {
@@ -234,6 +262,9 @@ pub fn compact_reason(reason: &str) -> String {
     }
     if lower.contains("executable has no authenticode signature") {
         return "Unsigned executable".into();
+    }
+    if lower.contains("decompression bomb") {
+        return "Possible zip bomb".into();
     }
     if lower.contains("exceeded") && lower.contains("threshold") {
         return "Too large for deep scan".into();
@@ -388,8 +419,46 @@ mod tests {
             "Too large for deep scan"
         );
         assert_eq!(
+            compact_reason(
+                "Potential decompression bomb: payload.dat, ratio 1026:1, 6731776 bytes declared"
+            ),
+            "Possible zip bomb"
+        );
+        assert_eq!(
             compact_reason("file exceeds snapshot_max_bytes (536870912)"),
             ""
+        );
+    }
+
+    #[test]
+    fn reputation_subjects_name_the_download_or_embedded_file() {
+        let mut report = AnalysisReportV1::new(FileEvidence {
+            display_path: r"C:\Users\example\Downloads\bundle.zip".into(),
+            sha256: Some("a".repeat(64)),
+            ..FileEvidence::default()
+        });
+        report.components.push(crate::report::ComponentEvidence {
+            nesting_path: "bundle/tool.exe".into(),
+            name: "bundle/tool.exe".into(),
+            size: 1,
+            sha256: Some("b".repeat(64)),
+            formats: Vec::new(),
+            severity: Severity::Info,
+            signed: None,
+            evidence: Vec::new(),
+        });
+
+        assert_eq!(
+            reputation_subject(&report, &"a".repeat(64)),
+            "Download file: bundle.zip"
+        );
+        assert_eq!(
+            reputation_subject(&report, &"B".repeat(64)),
+            "Inside: bundle/tool.exe"
+        );
+        assert_eq!(
+            reputation_subject(&report, &"c".repeat(64)),
+            "Hash: cccccccccccc..."
         );
     }
 

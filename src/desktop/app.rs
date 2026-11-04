@@ -20,7 +20,9 @@ use crate::report::{
 
 use super::actions::Worker;
 use super::actions::{WorkerEvent, WorkerRequest};
-use super::data::{DesktopSnapshot, RiskGroup, compact_reason, format_size, severity_label};
+use super::data::{
+    DesktopSnapshot, RiskGroup, compact_reason, format_size, reputation_subject, severity_label,
+};
 
 const CANVAS: Color32 = Color32::from_rgb(12, 16, 15);
 const PANEL: Color32 = Color32::from_rgb(21, 28, 25);
@@ -1186,12 +1188,12 @@ fn render_inventory(ui: &mut egui::Ui, report: &AnalysisReportV1) {
     }
 
     for component in &report.components {
-        render_component(ui, component);
+        render_component(ui, component, report);
         ui.add_space(7.0);
     }
 }
 
-fn render_component(ui: &mut egui::Ui, component: &ComponentEvidence) {
+fn render_component(ui: &mut egui::Ui, component: &ComponentEvidence, report: &AnalysisReportV1) {
     let color = severity_color(component.severity);
     Frame::new()
         .fill(PANEL)
@@ -1245,6 +1247,7 @@ fn render_component(ui: &mut egui::Ui, component: &ComponentEvidence) {
                                 .size(9.0)
                                 .color(Color32::from_rgb(110, 128, 119)),
                         );
+                        render_matching_reputation(ui, report, hash);
                     }
                 });
             });
@@ -1312,7 +1315,7 @@ fn render_reputation(ui: &mut egui::Ui, report: &AnalysisReportV1) {
             ReputationState::Undetected | ReputationState::NotFound => ACCENT,
             _ => MUTED,
         };
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             Frame::new()
                 .fill(color.gamma_multiply(0.14))
                 .inner_margin(egui::Margin::symmetric(7, 3))
@@ -1324,11 +1327,19 @@ fn render_reputation(ui: &mut egui::Ui, report: &AnalysisReportV1) {
                             .color(color),
                     );
                 });
-            let detail = reputation
-                .detail
-                .clone()
-                .unwrap_or_else(|| "VirusTotal hash lookup".into());
-            ui.label(RichText::new(detail).size(11.0).color(MUTED));
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(reputation_subject(report, &reputation.sha256))
+                        .size(11.0)
+                        .strong()
+                        .color(TEXT),
+                );
+                let detail = reputation
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| "VirusTotal hash lookup".into());
+                ui.label(RichText::new(detail).size(10.5).color(MUTED));
+            });
         });
     }
     if let Some(authenticity) = &report.authenticity {
@@ -1364,6 +1375,32 @@ fn render_reputation(ui: &mut egui::Ui, report: &AnalysisReportV1) {
             "Unsigned",
             &format!("{} nested component(s)", authenticity.unsigned_components),
         );
+    }
+}
+
+fn render_matching_reputation(ui: &mut egui::Ui, report: &AnalysisReportV1, hash: &str) {
+    for reputation in report.reputation.iter().filter(|entry| {
+        entry.sha256.eq_ignore_ascii_case(hash)
+            && matches!(
+                entry.state,
+                ReputationState::Malicious
+                    | ReputationState::Suspicious
+                    | ReputationState::RateLimited
+                    | ReputationState::Unavailable
+            )
+    }) {
+        let color = match reputation.state {
+            ReputationState::Malicious => DANGER,
+            ReputationState::Suspicious => WARNING,
+            _ => MUTED,
+        };
+        let label = match (reputation.detections, reputation.engines_total) {
+            (Some(detections), Some(engines)) => {
+                format!("VirusTotal {detections}/{engines}")
+            }
+            _ => format!("VirusTotal {:?}", reputation.state),
+        };
+        reason_badge(ui, &label, color);
     }
 }
 
