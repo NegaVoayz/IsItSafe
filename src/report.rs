@@ -660,7 +660,7 @@ mod tests {
         report
             .policy
             .reasons
-            .push("Unsigned executable with remote-access behavior".into());
+            .push("Unsigned executable\nwith remote-access behavior".into());
         report
             .policy
             .reasons
@@ -670,7 +670,7 @@ mod tests {
         assert_eq!(summary.verdict, Verdict::Suspicious);
         assert_eq!(
             summary.reasons,
-            vec!["Unsigned executable with remote-access behavior"]
+            vec!["Unsigned executable\\nwith remote-access behavior"]
         );
         let json = serde_json::to_value(summary).unwrap();
         assert!(json.get("components").is_none());
