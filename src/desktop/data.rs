@@ -188,6 +188,71 @@ pub fn severity_label(severity: Severity) -> &'static str {
     }
 }
 
+pub fn compact_reason(reason: &str) -> String {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("virustotal") {
+        let detections = reason
+            .split_whitespace()
+            .find(|part| {
+                part.split_once('/').is_some_and(|(found, total)| {
+                    found.chars().all(|character| character.is_ascii_digit())
+                        && total
+                            .trim_end_matches(|character: char| !character.is_ascii_digit())
+                            .chars()
+                            .all(|character| character.is_ascii_digit())
+                })
+            })
+            .map(|part| {
+                part.trim_end_matches(|character: char| !character.is_ascii_digit())
+                    .to_string()
+            });
+        return detections.map_or_else(
+            || "VirusTotal finding".into(),
+            |count| format!("VirusTotal {count}"),
+        );
+    }
+    if lower.contains("downloaded file name") && lower.contains("embedded original filename") {
+        return "Name differs from embedded file".into();
+    }
+    if lower.contains("multiple file formats") {
+        return "Multiple embedded formats".into();
+    }
+    if lower.contains("extension") && lower.contains("does not match") {
+        return "Extension/content mismatch".into();
+    }
+    if lower.contains("pdf") && lower.contains("active") {
+        return "Active PDF content".into();
+    }
+    if lower.contains("script references endpoint") {
+        return "Embedded endpoint".into();
+    }
+    if lower.contains("executable has no authenticode signature") {
+        return "Unsigned executable".into();
+    }
+    if lower.contains("exceeded") && lower.contains("threshold") {
+        return "Too large for deep scan".into();
+    }
+    if lower.contains("temporary download") {
+        return "Incomplete download".into();
+    }
+    if lower.contains("network reputation") {
+        return "Online reputation incomplete".into();
+    }
+    if lower.contains("structural evidence") {
+        return "Structural risk".into();
+    }
+    if lower.contains("user chose to keep") {
+        return "Kept by user".into();
+    }
+
+    let first_clause = reason.split([';', '•']).next().unwrap_or(reason).trim();
+    let mut compact = first_clause.chars().take(42).collect::<String>();
+    if first_clause.chars().count() > 42 {
+        compact.push('…');
+    }
+    compact
+}
+
 pub fn format_size(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;
@@ -286,6 +351,28 @@ mod tests {
                 r"C:\data\quarantine\setup.exe.abcdef123456-2.quarantined"
             )),
             "setup.exe"
+        );
+    }
+
+    #[test]
+    fn review_reasons_are_short_labels() {
+        assert_eq!(
+            compact_reason("VirusTotal: 3/93 engines flagged this file"),
+            "VirusTotal 3/93"
+        );
+        assert_eq!(
+            compact_reason(
+                "Downloaded file name ddu.exe differs from embedded original filename SqlSetupBootstrapper.exe"
+            ),
+            "Name differs from embedded file"
+        );
+        assert_eq!(
+            compact_reason("Filename extension .rels does not match detected content unknown"),
+            "Extension/content mismatch"
+        );
+        assert_eq!(
+            compact_reason("The file exceeded a deep-analysis resource threshold"),
+            "Too large for deep scan"
         );
     }
 

@@ -20,7 +20,7 @@ use crate::report::{
 
 use super::actions::Worker;
 use super::actions::{WorkerEvent, WorkerRequest};
-use super::data::{DesktopSnapshot, RiskGroup, format_size, severity_label};
+use super::data::{DesktopSnapshot, RiskGroup, compact_reason, format_size, severity_label};
 
 const CANVAS: Color32 = Color32::from_rgb(12, 16, 15);
 const PANEL: Color32 = Color32::from_rgb(21, 28, 25);
@@ -424,11 +424,40 @@ impl DesktopApp {
                                             {
                                                 details = Some(entry.summary.report_id);
                                             }
-                                            ui.label(
-                                                RichText::new(entry.summary.reasons.join("  •  "))
-                                                    .size(11.5)
-                                                    .color(MUTED),
-                                            );
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.spacing_mut().item_spacing.x = 6.0;
+                                                let mut shown = Vec::new();
+                                                for reason in &entry.summary.reasons {
+                                                    let compact = compact_reason(reason);
+                                                    if compact.is_empty()
+                                                        || shown
+                                                            .iter()
+                                                            .any(|existing| existing == &compact)
+                                                    {
+                                                        continue;
+                                                    }
+                                                    reason_badge(
+                                                        ui,
+                                                        &compact,
+                                                        risk_color(entry.group),
+                                                    );
+                                                    shown.push(compact);
+                                                    if shown.len() == 3 {
+                                                        break;
+                                                    }
+                                                }
+                                                if entry.summary.reasons.len() > shown.len() {
+                                                    ui.label(
+                                                        RichText::new(format!(
+                                                            "+{} more",
+                                                            entry.summary.reasons.len()
+                                                                - shown.len()
+                                                        ))
+                                                        .size(9.5)
+                                                        .color(MUTED),
+                                                    );
+                                                }
+                                            });
                                             ui.label(
                                                 RichText::new(format!(
                                                     "{} at {}",
@@ -1103,6 +1132,16 @@ fn severity_badge(ui: &mut egui::Ui, severity: Severity) {
                     .strong()
                     .color(color),
             );
+        });
+}
+
+fn reason_badge(ui: &mut egui::Ui, text: &str, color: Color32) {
+    Frame::new()
+        .fill(color.gamma_multiply(0.10))
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.34)))
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).size(9.5).color(color));
         });
 }
 
