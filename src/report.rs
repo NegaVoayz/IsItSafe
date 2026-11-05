@@ -84,6 +84,29 @@ impl AnalysisReportV1 {
         self.policy.quarantine_requested = true;
     }
 
+    pub fn certificate_problem_reason(&self) -> Option<&'static str> {
+        if self
+            .certificates
+            .iter()
+            .any(|certificate| certificate.revocation.state == RevocationState::Revoked)
+        {
+            return Some("Certificate is revoked");
+        }
+        let authenticity = self.authenticity.as_ref()?;
+        if authenticity.signature_digest_valid == Some(false) {
+            return Some("Signature digest is invalid");
+        }
+        if authenticity.chain_valid == Some(false) {
+            return if authenticity.timestamp_state == TimestampState::Invalid {
+                Some("Certificate is expired or invalid")
+            } else {
+                Some("Certificate chain is invalid")
+            };
+        }
+        (authenticity.timestamp_state == TimestampState::Invalid)
+            .then_some("Signature timestamp is invalid")
+    }
+
     pub fn summary(&self) -> ReportSummary {
         ReportSummary {
             schema_version: REPORT_SUMMARY_SCHEMA_VERSION.into(),

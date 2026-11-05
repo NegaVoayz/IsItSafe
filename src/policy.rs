@@ -25,16 +25,7 @@ pub fn evaluate(report: &mut AnalysisReportV1, config: &Config) {
         .reputation
         .iter()
         .any(|entry| entry.state == ReputationState::Suspicious);
-    let revoked = report.certificates.iter().any(|certificate| {
-        matches!(
-            certificate.revocation.state,
-            crate::report::RevocationState::Revoked
-        )
-    });
-    let invalid_signature = report
-        .authenticity
-        .as_ref()
-        .is_some_and(|value| value.signature_digest_valid == Some(false));
+    let certificate_problem = report.certificate_problem_reason();
     let high_evidence = report
         .facts
         .iter()
@@ -159,13 +150,10 @@ pub fn evaluate(report: &mut AnalysisReportV1, config: &Config) {
             .policy
             .reasons
             .push("VirusTotal reported suspicious detections".into());
-    } else if revoked || invalid_signature {
+    } else if let Some(reason) = certificate_problem {
         report.verdict = Verdict::Suspicious;
         report.policy.action = review_action(config);
-        report
-            .policy
-            .reasons
-            .push("Authenticity evidence is invalid or revoked".into());
+        report.policy.reasons.push(reason.into());
     } else if high_evidence || blocked_origin || browser_danger {
         report.verdict = Verdict::Suspicious;
         report.policy.action = review_action(config);
@@ -551,8 +539,8 @@ mod tests {
 
     use super::*;
     use crate::report::{
-        AnalysisReportV1, Confidence, DetectedFormat, Evidence, FileEvidence, ReputationEvidence,
-        VtBatch,
+        AnalysisReportV1, AuthenticityEvidence, Confidence, DetectedFormat, Evidence, FileEvidence,
+        ReputationEvidence, TimestampState, VtBatch,
     };
 
     #[test]
@@ -574,6 +562,42 @@ mod tests {
         assert_eq!(report.verdict, Verdict::Malicious);
         assert_eq!(report.policy.action, PolicyAction::Quarantine);
         assert_ne!(report.report_id, Uuid::nil());
+    }
+
+    #[test]
+    fn invalid_certificate_chain_requires_review() {
+        let mut report = AnalysisReportV1::new(FileEvidence::default());
+        report.authenticity = Some(AuthenticityEvidence {
+            signature_digest_valid: Some(true),
+            chain_valid: Some(false),
+            timestamp_state: TimestampState::Unknown,
+            ..AuthenticityEvidence::default()
+        });
+
+        evaluate(&mut report, &Config::default());
+
+        assert_eq!(report.verdict, Verdict::Suspicious);
+        assert_eq!(report.policy.action, PolicyAction::RequireReview);
+        assert_eq!(report.policy.reasons, vec!["Certificate chain is invalid"]);
+    }
+
+    #[test]
+    fn expired_certificate_chain_has_a_specific_reason() {
+        let mut report = AnalysisReportV1::new(FileEvidence::default());
+        report.authenticity = Some(AuthenticityEvidence {
+            signature_digest_valid: Some(true),
+            chain_valid: Some(false),
+            timestamp_state: TimestampState::Invalid,
+            ..AuthenticityEvidence::default()
+        });
+
+        evaluate(&mut report, &Config::default());
+
+        assert_eq!(report.verdict, Verdict::Suspicious);
+        assert_eq!(
+            report.policy.reasons,
+            vec!["Certificate is expired or invalid"]
+        );
     }
 
     #[test]

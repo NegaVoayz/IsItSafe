@@ -547,6 +547,23 @@ pub fn compact_reason(reason: &str) -> String {
     if lower.contains("executable has no authenticode signature") {
         return "Unsigned executable".into();
     }
+    if lower.contains("certificate is revoked")
+        || lower.contains("authenticity evidence is invalid or revoked")
+    {
+        return "Revoked certificate".into();
+    }
+    if lower.contains("signature digest is invalid") {
+        return "Invalid signature".into();
+    }
+    if lower.contains("certificate is expired or invalid") {
+        return "Expired certificate".into();
+    }
+    if lower.contains("certificate chain is invalid") {
+        return "Invalid certificate chain".into();
+    }
+    if lower.contains("signature timestamp is invalid") {
+        return "Invalid signature timestamp".into();
+    }
     if lower.contains(" is an exe disguised as .") || lower.contains(" is a dll disguised as .") {
         let kind = if lower.contains(" is an exe disguised as .") {
             "EXE"
@@ -773,6 +790,18 @@ mod tests {
         assert_eq!(
             compact_reason("payload.metadata has no file extension but is an EXE"),
             "EXE without extension"
+        );
+        assert_eq!(
+            compact_reason("Certificate is expired or invalid"),
+            "Expired certificate"
+        );
+        assert_eq!(
+            compact_reason("Certificate chain is invalid"),
+            "Invalid certificate chain"
+        );
+        assert_eq!(
+            compact_reason("Certificate is revoked"),
+            "Revoked certificate"
         );
         assert_eq!(
             compact_reason("file exceeds snapshot_max_bytes (536870912)"),
