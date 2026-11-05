@@ -309,9 +309,7 @@ pub fn restore_quarantine_from_desktop(
         append_report(paths, &report)?;
     }
 
-    Ok(format!(
-        "Restored {destination_name} to Downloads. The download execution barrier remains active."
-    ))
+    Ok("File is available in Review.".into())
 }
 
 pub fn parse_action_uri(uri: &str) -> Result<(UserDecision, Uuid)> {
