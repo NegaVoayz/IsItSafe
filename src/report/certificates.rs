@@ -35,17 +35,12 @@ pub struct RevocationEvidence {
     pub detail: Option<String>,
 }
 
-impl Default for RevocationState {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RevocationState {
     Valid,
     Revoked,
+    #[default]
     Unknown,
     NotChecked,
 }
@@ -61,22 +56,17 @@ pub struct AuthenticityEvidence {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TimestampState {
     Valid,
     Missing,
     Invalid,
+    #[default]
     Unknown,
 }
 
-impl Default for TimestampState {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PublisherReputation {
     Trusted,
@@ -84,13 +74,8 @@ pub enum PublisherReputation {
     RemoteAccess,
     BundlerOrPup,
     Untrusted,
+    #[default]
     Unknown,
-}
-
-impl Default for PublisherReputation {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

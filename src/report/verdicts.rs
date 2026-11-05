@@ -55,9 +55,10 @@ pub struct PolicyDecision {
     pub user_decision: Option<UserDecision>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyAction {
+    #[default]
     NoAction,
     Notify,
     RequireReview,
@@ -65,12 +66,6 @@ pub enum PolicyAction {
     BlockRecommended,
     UserRemoved,
     AwaitUserDecision,
-}
-
-impl Default for PolicyAction {
-    fn default() -> Self {
-        Self::NoAction
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

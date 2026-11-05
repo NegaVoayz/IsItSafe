@@ -101,33 +101,23 @@ pub struct OriginEvidence {
     pub correlation: Option<String>,
 }
 
-impl Default for OriginState {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum OriginState {
     Matched,
     Pending,
+    #[default]
     Unknown,
     TrackingDisabled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldState {
     Present,
     Unavailable,
+    #[default]
     Unknown,
-}
-
-impl Default for FieldState {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -151,15 +141,10 @@ pub struct LockAcquisitionEvidence {
     pub changed_inside_lock: bool,
 }
 
-impl Default for LockAcquisitionOutcome {
-    fn default() -> Self {
-        Self::NotAttempted
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LockAcquisitionOutcome {
+    #[default]
     NotAttempted,
     Acquired,
     Timeout,
@@ -176,18 +161,13 @@ pub struct MotwEvidence {
     pub raw: Option<String>,
 }
 
-impl Default for MotwState {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MotwState {
     Present,
     PresentEmpty,
     Absent,
+    #[default]
     Unknown,
 }
 
@@ -221,18 +201,13 @@ pub enum SandboxCapability {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxSelfTest {
     Denied,
     Allowed,
     NotRun,
+    #[default]
     Unknown,
-}
-
-impl Default for SandboxSelfTest {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
