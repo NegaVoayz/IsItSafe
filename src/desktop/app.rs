@@ -682,9 +682,6 @@ impl DesktopApp {
                         );
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if let Some(reason) = report.certificate_state_reason() {
-                            reason_badge(ui, &compact_reason(reason), DANGER);
-                        }
                         verdict_badge(ui, report.verdict);
                     });
                 });
