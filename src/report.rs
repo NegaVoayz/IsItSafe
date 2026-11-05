@@ -744,4 +744,31 @@ mod tests {
         assert!(product.signer_sha256.is_none());
         assert!(product.signature_digest_valid.is_none());
     }
+
+    #[test]
+    fn legacy_certificate_evidence_without_validity_dates_deserializes() {
+        let certificate: CertificateChainEvidence = serde_json::from_value(serde_json::json!({
+            "subject": "CN=Legacy Publisher",
+            "issuer": "CN=Legacy Root",
+            "serial_number": "01",
+            "sha256_fingerprint": "a".repeat(64),
+            "ocsp_urls": [],
+            "crl_urls": [],
+            "role": "leaf",
+            "root_trusted": true,
+            "timestamp_present": false,
+            "timestamp_time": null,
+            "revocation": {
+                "state": "not_checked",
+                "source": null,
+                "this_update": null,
+                "next_update": null,
+                "detail": null
+            }
+        }))
+        .unwrap();
+
+        assert!(certificate.not_before.is_none());
+        assert!(certificate.not_after.is_none());
+    }
 }

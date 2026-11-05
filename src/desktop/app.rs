@@ -22,7 +22,7 @@ use super::actions::Worker;
 use super::actions::{WorkerEvent, WorkerRequest};
 use super::data::{
     DesktopSnapshot, RiskGroup, SignatureState, compact_reason, format_size,
-    group_products_by_signature, reputation_subject, severity_label,
+    group_products_by_software, reputation_subject, severity_label,
 };
 
 const CANVAS: Color32 = Color32::from_rgb(12, 16, 15);
@@ -707,19 +707,16 @@ impl DesktopApp {
 
                 if !report.products.is_empty() {
                     ui.add_space(10.0);
-                    let groups = group_products_by_signature(report);
+                    let groups = group_products_by_software(report);
                     egui::CollapsingHeader::new(
-                        RichText::new(format!(
-                            "Software identities by signer ({} groups)",
-                            groups.len()
-                        ))
-                        .strong()
-                        .color(TEXT),
+                        RichText::new(format!("Software identities ({} groups)", groups.len()))
+                            .strong()
+                            .color(TEXT),
                     )
                     .default_open(true)
                     .show(ui, |ui| {
                         for (index, group) in groups.iter().enumerate() {
-                            render_signature_group(ui, group, index);
+                            render_software_group(ui, group, index);
                         }
                     });
                 }
@@ -1259,112 +1256,181 @@ fn render_component(ui: &mut egui::Ui, component: &ComponentEvidence, report: &A
         });
 }
 
-fn render_product_identity(ui: &mut egui::Ui, product: &ProductIdentityEvidence) {
-    Frame::new()
-        .fill(PANEL_ALT)
-        .stroke(Stroke::new(1.0, LINE))
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::symmetric(9, 7))
+fn render_software_group(
+    ui: &mut egui::Ui,
+    group: &super::data::SoftwareIdentityGroup,
+    index: usize,
+) {
+    let carrier_count: usize = group
+        .certificates
+        .iter()
+        .map(|certificate| certificate.products.len())
+        .sum();
+    let risky = group.certificates.iter().any(|certificate| {
+        matches!(
+            certificate.state,
+            SignatureState::Invalid
+                | SignatureState::Revoked
+                | SignatureState::Expired
+                | SignatureState::NotYetValid
+                | SignatureState::Unsigned
+        )
+    });
+    let summary = format!(
+        "{}  •  {} certificate{}, {}",
+        group.product_name,
+        group.certificates.len(),
+        if group.certificates.len() == 1 {
+            ""
+        } else {
+            "s"
+        },
+        file_count_label(carrier_count)
+    );
+    egui::CollapsingHeader::new(RichText::new(summary).size(13.0).strong().color(TEXT))
+        .id_salt(("software-identity", index, &group.product_name))
+        .default_open(risky)
         .show(ui, |ui| {
-            ui.label(
-                RichText::new(
-                    product
-                        .product_name
-                        .as_deref()
-                        .unwrap_or("<unnamed product>"),
-                )
-                .size(12.0)
-                .strong()
-                .color(TEXT),
-            );
             key_value(
                 ui,
                 "Manufacturer",
-                product.manufacturer.as_deref().unwrap_or("not declared"),
+                group.manufacturer.as_deref().unwrap_or("not declared"),
             );
-            if let Some(version) = &product.product_version {
+            if let Some(version) = &group.product_version {
                 key_value(ui, "Version", version);
             }
-            if let Some(original) = &product.original_filename {
-                key_value(ui, "Original filename", original);
+            if let Some(product) = group
+                .certificates
+                .iter()
+                .flat_map(|certificate| &certificate.products)
+                .next()
+            {
+                if let Some(description) = &product.file_description {
+                    key_value(ui, "Description", description);
+                }
+                if let Some(copyright) = &product.legal_copyright {
+                    key_value(ui, "Copyright", copyright);
+                }
             }
-            if let Some(description) = &product.file_description {
-                key_value(ui, "File description", description);
+            ui.add_space(7.0);
+            for (certificate_index, certificate) in group.certificates.iter().enumerate() {
+                render_certificate_group(ui, certificate, (index, certificate_index));
             }
-            if let Some(code) = &product.product_code {
-                key_value(ui, "Product code", code);
-            }
-            if let Some(copyright) = &product.legal_copyright {
-                key_value(ui, "Copyright", copyright);
-            }
-            if let Some(signer) = &product.signer_identity {
-                key_value(ui, "Signer", signer);
-            }
-            if let Some(fingerprint) = &product.signer_sha256 {
-                key_value(ui, "Certificate SHA-256", fingerprint);
-            }
-            key_value(
-                ui,
-                "Evidence source",
-                product.nesting_path.as_deref().unwrap_or(&product.source),
-            );
         });
-    ui.add_space(5.0);
 }
 
-fn render_signature_group(ui: &mut egui::Ui, group: &super::data::SignatureGroup, index: usize) {
+fn render_certificate_group(
+    ui: &mut egui::Ui,
+    group: &super::data::SignatureGroup,
+    id: (usize, usize),
+) {
     let color = signature_color(group.state);
-    let status = if group.signer == group.state.label() {
-        String::new()
-    } else {
-        format!("  ·  {}", group.state.label())
-    };
-    let certificate = group
-        .certificate_sha256
-        .as_deref()
-        .map(|value| format!("  ·  cert {}", &value[..value.len().min(8)]))
-        .unwrap_or_default();
-    egui::CollapsingHeader::new(
-        RichText::new(format!(
-            "{}{}  ·  {} file{}{}",
-            group.signer,
-            status,
-            group.products.len(),
-            if group.products.len() == 1 { "" } else { "s" },
-            certificate
-        ))
-        .size(13.0)
-        .strong()
-        .color(color),
-    )
-    .id_salt(("signature-group", index, &group.signer))
-    .default_open(matches!(
-        group.state,
-        SignatureState::Invalid | SignatureState::Unsigned
-    ))
-    .show(ui, |ui| {
-        if let Some(fingerprint) = &group.certificate_sha256 {
-            key_value(ui, "Certificate SHA-256", fingerprint);
-        }
-        for (product_index, product) in group.products.iter().enumerate() {
-            let name = product
-                .product_name
-                .as_deref()
-                .unwrap_or("<unnamed product>");
-            let carrier = product
-                .nesting_path
-                .as_deref()
-                .unwrap_or("the downloaded file");
+    Frame::new()
+        .fill(PANEL_ALT)
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.35)))
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Certificate").size(10.0).color(MUTED));
+                if !matches!(
+                    group.state,
+                    SignatureState::Unsigned | SignatureState::Unknown
+                ) {
+                    ui.label(RichText::new(&group.signer).size(12.0).strong().color(TEXT));
+                }
+                signature_badge(ui, group.state);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(file_count_label(group.products.len()))
+                            .size(10.0)
+                            .color(MUTED),
+                    );
+                });
+            });
+            if let Some(signer) = group
+                .products
+                .iter()
+                .find_map(|product| product.signer_identity.as_deref())
+                && signer != group.signer
+            {
+                key_value(ui, "Signer", signer);
+            }
+            if let Some(fingerprint) = &group.certificate_sha256 {
+                key_value(ui, "SHA-256", fingerprint);
+            }
+            if let Some(validity) = group.validity_label() {
+                key_value(ui, "Validity", &validity);
+            }
+            ui.add_space(4.0);
             egui::CollapsingHeader::new(
-                RichText::new(format!("{name}  ·  {carrier}"))
-                    .size(11.5)
-                    .color(TEXT),
+                RichText::new(format!(
+                    "Evidence source  •  {}",
+                    file_count_label(group.products.len())
+                ))
+                .size(11.0)
+                .color(TEXT),
             )
-            .id_salt(("signature-product", index, product_index, carrier))
+            .id_salt(("evidence-source", id, &group.signer))
             .default_open(false)
-            .show(ui, |ui| render_product_identity(ui, product));
-        }
-    });
+            .show(ui, |ui| {
+                for product in &group.products {
+                    render_product_source(ui, product);
+                }
+            });
+        });
+    ui.add_space(7.0);
+}
+
+fn render_product_source(ui: &mut egui::Ui, product: &ProductIdentityEvidence) {
+    let carrier = product
+        .nesting_path
+        .as_deref()
+        .unwrap_or("the downloaded file");
+    ui.label(
+        RichText::new(
+            product
+                .original_filename
+                .as_deref()
+                .or_else(|| {
+                    Path::new(carrier)
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                })
+                .unwrap_or(carrier),
+        )
+        .size(11.0)
+        .strong()
+        .color(TEXT),
+    );
+    ui.label(RichText::new(carrier).monospace().size(9.5).color(MUTED));
+    let mut source = product.source.clone();
+    if let Some(original) = &product.original_filename
+        && !original.eq_ignore_ascii_case(
+            Path::new(carrier)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default(),
+        )
+    {
+        source = format!("Original filename {original}  •  {source}");
+    }
+    ui.label(RichText::new(source).size(9.5).color(MUTED));
+}
+
+fn signature_badge(ui: &mut egui::Ui, state: SignatureState) {
+    let color = signature_color(state);
+    Frame::new()
+        .fill(color.gamma_multiply(0.14))
+        .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(state.label()).size(9.5).strong().color(color));
+        });
+}
+
+fn file_count_label(count: usize) -> String {
+    format!("{count} file{}", if count == 1 { "" } else { "s" })
 }
 
 fn signature_color(state: SignatureState) -> Color32 {
