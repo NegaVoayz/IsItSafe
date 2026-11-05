@@ -582,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn expired_certificate_chain_has_a_specific_reason() {
+    fn expired_certificate_is_reported_without_escalating_the_verdict() {
         let mut report = AnalysisReportV1::new(FileEvidence::default());
         report.authenticity = Some(AuthenticityEvidence {
             signature_digest_valid: Some(true),
@@ -593,10 +593,17 @@ mod tests {
 
         evaluate(&mut report, &Config::default());
 
-        assert_eq!(report.verdict, Verdict::Suspicious);
+        assert_eq!(report.verdict, Verdict::NoHighRiskFound);
+        assert!(
+            !report
+                .policy
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("expired"))
+        );
         assert_eq!(
-            report.policy.reasons,
-            vec!["Certificate is expired or invalid"]
+            report.certificate_state_reason(),
+            Some("Certificate has expired")
         );
     }
 

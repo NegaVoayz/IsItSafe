@@ -682,7 +682,7 @@ impl DesktopApp {
                         );
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if let Some(reason) = report.certificate_problem_reason() {
+                        if let Some(reason) = report.certificate_state_reason() {
                             reason_badge(ui, &compact_reason(reason), DANGER);
                         }
                         verdict_badge(ui, report.verdict);
@@ -1380,29 +1380,11 @@ fn render_software_group(
 }
 
 fn software_group_color(group: &super::data::SoftwareIdentityGroup) -> Color32 {
-    if group.certificates.iter().any(|certificate| {
-        matches!(
-            certificate.state,
-            SignatureState::Invalid | SignatureState::Revoked | SignatureState::Expired
-        )
-    }) {
-        DANGER
-    } else if group.certificates.iter().any(|certificate| {
-        matches!(
-            certificate.state,
-            SignatureState::NotYetValid | SignatureState::Unsigned
-        )
-    }) {
-        WARNING
-    } else if group.certificates.iter().any(|certificate| {
-        matches!(
-            certificate.state,
-            SignatureState::Unknown | SignatureState::Unverified
-        )
-    }) {
-        BLUE
-    } else {
-        ACCENT
+    match group.risk_state() {
+        SignatureState::Invalid | SignatureState::Revoked => DANGER,
+        SignatureState::Unsigned | SignatureState::NotYetValid => WARNING,
+        SignatureState::Expired | SignatureState::Unknown | SignatureState::Unverified => BLUE,
+        SignatureState::Valid => ACCENT,
     }
 }
 
@@ -1516,11 +1498,9 @@ fn file_count_label(count: usize) -> String {
 
 fn signature_color(state: SignatureState) -> Color32 {
     match state {
-        SignatureState::Invalid | SignatureState::Revoked | SignatureState::Expired => DANGER,
-        SignatureState::NotYetValid => WARNING,
-        SignatureState::Unsigned => WARNING,
-        SignatureState::Unknown => MUTED,
-        SignatureState::Unverified => BLUE,
+        SignatureState::Invalid | SignatureState::Revoked => DANGER,
+        SignatureState::Unsigned | SignatureState::NotYetValid => WARNING,
+        SignatureState::Expired | SignatureState::Unknown | SignatureState::Unverified => BLUE,
         SignatureState::Valid => ACCENT,
     }
 }

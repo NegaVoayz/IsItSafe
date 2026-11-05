@@ -11,7 +11,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::report::{AnalysisReportV1, ReportSummary, Verdict};
+use crate::report::{AnalysisReportV1, REPORT_SUMMARY_SCHEMA_VERSION, ReportSummary, Verdict};
 
 #[derive(Debug)]
 pub struct Database {
@@ -517,17 +517,39 @@ impl Database {
 
     pub fn latest_report_summaries(&self) -> Result<Vec<ReportSummary>> {
         let connection = self.connection.lock().unwrap();
-        let mut statement = connection.prepare(
-            "SELECT summary_json FROM reports
-             WHERE summary_json IS NOT NULL
-             ORDER BY created_at DESC",
-        )?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let rows = {
+            let mut statement = connection.prepare(
+                "SELECT report_id, summary_json FROM reports
+                 WHERE summary_json IS NOT NULL
+                 ORDER BY created_at DESC",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
         let mut seen = HashSet::new();
         let mut summaries = Vec::new();
-        for row in rows {
-            let summary: ReportSummary =
-                serde_json::from_str(&row?).context("stored report summary is not valid JSON")?;
+        for (report_id, summary_json) in rows {
+            let mut summary: ReportSummary = serde_json::from_str(&summary_json)
+                .context("stored report summary is not valid JSON")?;
+            if summary.schema_version != REPORT_SUMMARY_SCHEMA_VERSION {
+                let report_json = connection.query_row(
+                    "SELECT json FROM reports WHERE report_id=?1",
+                    [&report_id],
+                    |row| row.get::<_, String>(0),
+                )?;
+                let report: AnalysisReportV1 = serde_json::from_str(&report_json)
+                    .context("stored report cannot be re-summarized")?;
+                summary = report.summary();
+                connection.execute(
+                    "UPDATE reports SET summary_json=?1 WHERE report_id=?2",
+                    params![
+                        serde_json::to_string(&summary)?,
+                        summary.report_id.to_string()
+                    ],
+                )?;
+            }
             if seen.insert(normalize_path(&summary.path)) {
                 summaries.push(summary);
             }
@@ -943,5 +965,66 @@ mod tests {
             entries[0].summary.as_ref().unwrap().reasons,
             vec!["older reason"]
         );
+    }
+
+    #[test]
+    fn latest_summaries_refresh_after_the_summary_schema_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = Database::open(&directory.path().join("state.db")).unwrap();
+        let mut report = AnalysisReportV1::new(crate::report::FileEvidence {
+            display_path: directory
+                .path()
+                .join("metadata.winmd")
+                .to_string_lossy()
+                .into_owned(),
+            ..crate::report::FileEvidence::default()
+        });
+        report.authenticity = Some(crate::report::AuthenticityEvidence {
+            signature_digest_valid: Some(true),
+            chain_valid: Some(true),
+            timestamp_state: crate::report::TimestampState::Unknown,
+            ..crate::report::AuthenticityEvidence::default()
+        });
+        report
+            .certificates
+            .push(crate::report::CertificateChainEvidence {
+                subject: "CN=Example Publisher".into(),
+                issuer: "CN=Example Root".into(),
+                serial_number: "01".into(),
+                sha256_fingerprint: "a".repeat(64),
+                ocsp_urls: Vec::new(),
+                crl_urls: Vec::new(),
+                role: crate::report::CertificateRole::Leaf,
+                root_trusted: Some(true),
+                timestamp_present: true,
+                timestamp_time: None,
+                not_before: Some(Utc::now() - chrono::Duration::days(365)),
+                not_after: Some(Utc::now() - chrono::Duration::days(1)),
+                revocation: crate::report::RevocationEvidence {
+                    state: crate::report::RevocationState::Valid,
+                    ..crate::report::RevocationEvidence::default()
+                },
+            });
+        db.store_report(&report).unwrap();
+
+        let mut old_summary = report.summary();
+        old_summary.schema_version = "1.0".into();
+        old_summary.reasons = vec!["Online reputation incomplete".into()];
+        db.connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE reports SET summary_json=?1 WHERE report_id=?2",
+                params![
+                    serde_json::to_string(&old_summary).unwrap(),
+                    report.report_id.to_string()
+                ],
+            )
+            .unwrap();
+
+        let summaries = db.latest_report_summaries().unwrap();
+
+        assert_eq!(summaries[0].schema_version, REPORT_SUMMARY_SCHEMA_VERSION);
+        assert_eq!(summaries[0].reasons, vec!["Certificate has expired"]);
     }
 }

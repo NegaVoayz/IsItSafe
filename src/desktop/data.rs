@@ -85,7 +85,7 @@ pub struct DesktopSnapshot {
     pub quarantine: Vec<QuarantineItem>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignatureState {
     Invalid,
     Revoked,
@@ -110,6 +110,19 @@ impl SignatureState {
             Self::Valid => "Valid",
         }
     }
+
+    pub fn risk_rank(self) -> u8 {
+        match self {
+            Self::Invalid => 0,
+            Self::Revoked => 1,
+            Self::Unsigned => 2,
+            Self::Expired => 3,
+            Self::NotYetValid => 4,
+            Self::Unknown => 5,
+            Self::Unverified => 6,
+            Self::Valid => 7,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -125,7 +138,7 @@ impl SoftwareIdentityGroup {
         self.certificates
             .iter()
             .map(|certificate| certificate.state)
-            .min()
+            .min_by_key(|state| state.risk_rank())
             .unwrap_or(SignatureState::Unknown)
     }
 
@@ -179,18 +192,22 @@ pub fn group_products_by_software(report: &AnalysisReportV1) -> Vec<SoftwareIden
             });
         }
         group.certificates.sort_by(|left, right| {
-            left.state.cmp(&right.state).then_with(|| {
-                left.signer
-                    .to_ascii_lowercase()
-                    .cmp(&right.signer.to_ascii_lowercase())
-            })
+            left.state
+                .risk_rank()
+                .cmp(&right.state.risk_rank())
+                .then_with(|| {
+                    left.signer
+                        .to_ascii_lowercase()
+                        .cmp(&right.signer.to_ascii_lowercase())
+                })
         });
     }
 
     let mut groups: Vec<_> = groups.into_values().collect();
     groups.sort_by(|left, right| {
         left.risk_state()
-            .cmp(&right.risk_state())
+            .risk_rank()
+            .cmp(&right.risk_state().risk_rank())
             .then_with(|| {
                 left.product_name
                     .to_ascii_lowercase()
@@ -261,12 +278,12 @@ fn signature_group_for_product(
         .is_some_and(|value| value.revocation.state == crate::report::RevocationState::Revoked)
     {
         SignatureState::Revoked
+    } else if signed == Some(false) {
+        SignatureState::Unsigned
     } else if not_after.is_some_and(|value| now > value) {
         SignatureState::Expired
     } else if not_before.is_some_and(|value| now < value) {
         SignatureState::NotYetValid
-    } else if signed == Some(false) {
-        SignatureState::Unsigned
     } else if digest_valid == Some(true) {
         SignatureState::Valid
     } else if signer.is_some() || signed == Some(true) {
@@ -555,7 +572,9 @@ pub fn compact_reason(reason: &str) -> String {
     if lower.contains("signature digest is invalid") {
         return "Invalid signature".into();
     }
-    if lower.contains("certificate is expired or invalid") {
+    if lower.contains("certificate has expired")
+        || lower.contains("certificate is expired or invalid")
+    {
         return "Expired certificate".into();
     }
     if lower.contains("certificate chain is invalid") {
@@ -796,6 +815,10 @@ mod tests {
             "Expired certificate"
         );
         assert_eq!(
+            compact_reason("Certificate has expired"),
+            "Expired certificate"
+        );
+        assert_eq!(
             compact_reason("Certificate chain is invalid"),
             "Invalid certificate chain"
         );
@@ -913,6 +936,35 @@ mod tests {
         assert_eq!(SignatureState::Revoked.label(), "Revoked");
         assert_eq!(SignatureState::Expired.label(), "Expired");
         assert_eq!(SignatureState::NotYetValid.label(), "Not Yet Valid");
+    }
+
+    #[test]
+    fn certificate_risk_orders_revoked_unsigned_then_expired() {
+        assert!(SignatureState::Revoked.risk_rank() < SignatureState::Unsigned.risk_rank());
+        assert!(SignatureState::Unsigned.risk_rank() < SignatureState::Expired.risk_rank());
+        assert!(SignatureState::Expired.risk_rank() < SignatureState::Valid.risk_rank());
+
+        let mut group = SoftwareIdentityGroup {
+            product_name: "Example".into(),
+            manufacturer: None,
+            product_version: None,
+            certificates: Vec::new(),
+        };
+        for state in [
+            SignatureState::Expired,
+            SignatureState::Unsigned,
+            SignatureState::Revoked,
+        ] {
+            group.certificates.push(SignatureGroup {
+                signer: format!("{state:?}"),
+                certificate_sha256: None,
+                state,
+                not_before: None,
+                not_after: None,
+                products: Vec::new(),
+            });
+        }
+        assert_eq!(group.risk_state(), SignatureState::Revoked);
     }
 
     #[test]

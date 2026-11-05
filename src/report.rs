@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const SCHEMA_VERSION: &str = "1.2";
-pub const REPORT_SUMMARY_SCHEMA_VERSION: &str = "1.0";
+pub const REPORT_SUMMARY_SCHEMA_VERSION: &str = "1.1";
 pub const LIMITATION_NOTICE: &str =
     "Static analysis found no high-risk content; this does not prove runtime safety.";
 
@@ -84,7 +84,7 @@ impl AnalysisReportV1 {
         self.policy.quarantine_requested = true;
     }
 
-    pub fn certificate_problem_reason(&self) -> Option<&'static str> {
+    pub fn certificate_state_reason(&self) -> Option<&'static str> {
         if self
             .certificates
             .iter()
@@ -98,13 +98,37 @@ impl AnalysisReportV1 {
         }
         if authenticity.chain_valid == Some(false) {
             return if authenticity.timestamp_state == TimestampState::Invalid {
-                Some("Certificate is expired or invalid")
+                Some("Certificate has expired")
             } else {
                 Some("Certificate chain is invalid")
             };
         }
-        (authenticity.timestamp_state == TimestampState::Invalid)
-            .then_some("Signature timestamp is invalid")
+        if authenticity.timestamp_state == TimestampState::Invalid {
+            return Some("Signature timestamp is invalid");
+        }
+        let now = Utc::now();
+        if self.certificates.iter().any(|certificate| {
+            certificate.role != CertificateRole::Root
+                && certificate.not_after.is_some_and(|value| now > value)
+        }) {
+            return Some("Certificate has expired");
+        }
+        self.certificates
+            .iter()
+            .any(|certificate| {
+                certificate.role != CertificateRole::Root
+                    && certificate.not_before.is_some_and(|value| now < value)
+            })
+            .then_some("Certificate is not yet valid")
+    }
+
+    pub fn certificate_problem_reason(&self) -> Option<&'static str> {
+        self.certificate_state_reason().filter(|reason| {
+            !matches!(
+                *reason,
+                "Certificate has expired" | "Certificate is not yet valid"
+            )
+        })
     }
 
     pub fn summary(&self) -> ReportSummary {
@@ -151,6 +175,10 @@ fn concise_reasons(report: &AnalysisReportV1) -> Vec<String> {
             continue;
         }
         push_unique(&mut reasons, reason.clone());
+    }
+
+    if let Some(reason) = report.certificate_state_reason() {
+        push_unique(&mut reasons, reason.into());
     }
 
     let mut facts: Vec<&Evidence> = report
@@ -750,6 +778,50 @@ mod tests {
         );
         let json = serde_json::to_value(summary).unwrap();
         assert!(json.get("components").is_none());
+    }
+
+    #[test]
+    fn report_summary_includes_expired_certificate_state() {
+        let mut report = AnalysisReportV1::new(FileEvidence {
+            display_path: r"C:\Downloads\metadata.winmd".into(),
+            ..FileEvidence::default()
+        });
+        report.authenticity = Some(AuthenticityEvidence {
+            signature_digest_valid: Some(true),
+            chain_valid: Some(true),
+            timestamp_state: TimestampState::Unknown,
+            ..AuthenticityEvidence::default()
+        });
+        report.certificates.push(CertificateChainEvidence {
+            subject: "CN=Example Publisher".into(),
+            issuer: "CN=Example Root".into(),
+            serial_number: "01".into(),
+            sha256_fingerprint: "a".repeat(64),
+            ocsp_urls: Vec::new(),
+            crl_urls: Vec::new(),
+            role: CertificateRole::Leaf,
+            root_trusted: Some(true),
+            timestamp_present: true,
+            timestamp_time: None,
+            not_before: Some(Utc::now() - chrono::Duration::days(365)),
+            not_after: Some(Utc::now() - chrono::Duration::days(1)),
+            revocation: RevocationEvidence {
+                state: RevocationState::Valid,
+                ..RevocationEvidence::default()
+            },
+        });
+        report
+            .policy
+            .reasons
+            .push("Some required network reputation checks are not complete".into());
+
+        assert_eq!(
+            report.summary().reasons,
+            vec![
+                "Some required network reputation checks are not complete",
+                "Certificate has expired"
+            ]
+        );
     }
 
     #[test]
