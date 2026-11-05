@@ -1,7 +1,10 @@
 #![windows_subsystem = "windows"]
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use isitsafe::config::{AppPaths, Config};
+use isitsafe::db::Database;
+use isitsafe::interaction::handle_action_uri;
+use isitsafe::sandbox::{is_internal_child_invocation, run_child_main};
 use std::io::Write;
 
 fn main() {
@@ -18,7 +21,27 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let background = std::env::args().any(|argument| argument == "--background");
+    if is_internal_child_invocation() {
+        return run_child_main();
+    }
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|value| value == "handle-action")
+    {
+        let uri = arguments
+            .get(1)
+            .ok_or_else(|| anyhow!("notification action URI is missing"))?;
+        let paths = AppPaths::discover()?;
+        paths.ensure()?;
+        let config = Config::load_or_create(&paths.config_file)?;
+        config.validate()?;
+        isitsafe::logging::initialize(&paths, &config)?;
+        let database = Database::open_with_recovery(&paths.database)?;
+        handle_action_uri(uri, &config, &database, &paths)?;
+        return Ok(());
+    }
+    let background = arguments.iter().any(|argument| argument == "--background");
     let paths = AppPaths::discover()?;
     paths.ensure()?;
     let config = Config::load_or_create(&paths.config_file)?;
