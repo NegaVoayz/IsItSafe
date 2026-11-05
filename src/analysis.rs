@@ -998,18 +998,7 @@ fn pe_extension_mismatch(path: &Path, data: &[u8]) -> Option<Evidence> {
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned());
-    let summary = match extension.as_deref() {
-        Some("dll") => {
-            format!("{display_name} uses a .dll extension but its PE header marks it as an EXE")
-        }
-        Some("exe") => {
-            format!("{display_name} uses a .exe extension but its PE header marks it as a DLL")
-        }
-        Some(extension) => {
-            format!("{display_name} is a PE executable disguised with the .{extension} extension")
-        }
-        None => format!("{display_name} is a PE executable with no file extension"),
-    };
+    let summary = pe_type_mismatch_summary(&display_name, extension.as_deref(), pe.is_lib);
     Some(evidence(
         format!("pe:type-mismatch:{display_name}"),
         "pe_extension_mismatch",
@@ -1020,13 +1009,25 @@ fn pe_extension_mismatch(path: &Path, data: &[u8]) -> Option<Evidence> {
     ))
 }
 
+fn pe_type_mismatch_summary(
+    display_name: &str,
+    extension: Option<&str>,
+    is_library: bool,
+) -> String {
+    let kind = if is_library { "a DLL" } else { "an EXE" };
+    match extension {
+        Some(extension) => format!("{display_name} is {kind} disguised as .{extension}"),
+        None => format!("{display_name} has no file extension but is {kind}"),
+    }
+}
+
 fn pe_type_mismatch_severity(extension: Option<&str>, is_library: bool) -> Option<Severity> {
     const EXPECTED_PE_EXTENSIONS: &[&str] =
         &["exe", "dll", "sys", "ocx", "cpl", "scr", "efi", "acm", "ax"];
     match (extension, is_library) {
         (None, _) => Some(Severity::High),
         (Some(extension), _) if !EXPECTED_PE_EXTENSIONS.contains(&extension) => {
-            Some(Severity::High)
+            (extension != "winmd" || !is_library).then_some(Severity::High)
         }
         (Some("dll"), false) => Some(Severity::High),
         (Some("exe"), true) => Some(Severity::Medium),
@@ -2400,6 +2401,27 @@ mod tests {
         assert_eq!(pe_type_mismatch_severity(None, false), Some(Severity::High));
         assert_eq!(pe_type_mismatch_severity(Some("dll"), true), None);
         assert_eq!(pe_type_mismatch_severity(Some("exe"), false), None);
+        assert_eq!(pe_type_mismatch_severity(Some("winmd"), true), None);
+        assert_eq!(
+            pe_type_mismatch_severity(Some("winmd"), false),
+            Some(Severity::High)
+        );
+    }
+
+    #[test]
+    fn pe_type_mismatch_summary_names_exe_and_dll_precisely() {
+        assert_eq!(
+            pe_type_mismatch_summary("loader.dll", Some("dll"), false),
+            "loader.dll is an EXE disguised as .dll"
+        );
+        assert_eq!(
+            pe_type_mismatch_summary("metadata.winmd", Some("winmd"), false),
+            "metadata.winmd is an EXE disguised as .winmd"
+        );
+        assert_eq!(
+            pe_type_mismatch_summary("library.exe", Some("exe"), true),
+            "library.exe is a DLL disguised as .exe"
+        );
     }
 
     #[test]

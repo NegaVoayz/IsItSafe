@@ -547,6 +547,20 @@ pub fn compact_reason(reason: &str) -> String {
     if lower.contains("executable has no authenticode signature") {
         return "Unsigned executable".into();
     }
+    if lower.contains(" is an exe disguised as .") || lower.contains(" is a dll disguised as .") {
+        let kind = if lower.contains(" is an exe disguised as .") {
+            "EXE"
+        } else {
+            "DLL"
+        };
+        let extension = reason
+            .split_once(" disguised as .")
+            .map_or("other", |(_, extension)| {
+                extension.split_whitespace().next().unwrap_or("other")
+            });
+        return format!("{kind} hidden as .{extension}");
+    }
+    // Preserve the concise label for reports written before the PE wording change.
     if lower.contains("pe executable disguised with the .") {
         let extension = reason
             .split("with the .")
@@ -561,8 +575,17 @@ pub fn compact_reason(reason: &str) -> String {
     if lower.contains("uses a .exe extension") && lower.contains("marks it as a dll") {
         return "DLL hidden as .exe".into();
     }
+    if lower.contains("has no file extension but is an exe")
+        || lower.contains("has no file extension but is a dll")
+    {
+        return if lower.contains("but is an exe") {
+            "EXE without extension".into()
+        } else {
+            "DLL without extension".into()
+        };
+    }
     if lower.contains("pe executable with no file extension") {
-        return "Executable without extension".into();
+        return "EXE without extension".into();
     }
     if lower.contains("decompression bomb") {
         return "Possible zip bomb".into();
@@ -738,6 +761,18 @@ mod tests {
         assert_eq!(
             compact_reason("patch.dat is a PE executable disguised with the .dat extension"),
             "Executable hidden as .dat"
+        );
+        assert_eq!(
+            compact_reason("SqlSetupBootstrapper.dll is an EXE disguised as .dll"),
+            "EXE hidden as .dll"
+        );
+        assert_eq!(
+            compact_reason("metadata.dat is a DLL disguised as .dat"),
+            "DLL hidden as .dat"
+        );
+        assert_eq!(
+            compact_reason("payload.metadata has no file extension but is an EXE"),
+            "EXE without extension"
         );
         assert_eq!(
             compact_reason("file exceeds snapshot_max_bytes (536870912)"),
