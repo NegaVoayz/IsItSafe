@@ -657,7 +657,11 @@ fn quarantine_original_name(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interaction::{
+        DecisionSource, execute_user_decision, restore_quarantine_from_desktop,
+    };
     use crate::report::{AnalysisReportV1, FileEvidence, PolicyAction, UserDecision};
+    use sha2::{Digest, Sha256};
 
     #[test]
     fn risk_groups_cover_every_review_verdict() {
@@ -1024,5 +1028,61 @@ mod tests {
             snapshot.questionable[0].summary.file_name,
             "questionable.exe"
         );
+    }
+
+    #[test]
+    fn restored_quarantine_returns_to_review() {
+        let root = tempfile::tempdir().unwrap();
+        let downloads = root.path().join("Downloads");
+        fs::create_dir_all(&downloads).unwrap();
+        let source = downloads.join("restored.exe");
+        let bytes = b"restored test content";
+        fs::write(&source, bytes).unwrap();
+        let hash = hex::encode(Sha256::digest(bytes));
+        let mut config = Config {
+            download_dir: downloads,
+            ..Config::default()
+        };
+        config.security.block_execution_in_download_dir = false;
+        let paths = AppPaths {
+            config_file: root.path().join("config.toml"),
+            data_dir: root.path().to_path_buf(),
+            database: root.path().join("state.db"),
+            reports_dir: root.path().join("reports"),
+            logs_dir: root.path().join("logs"),
+            quarantine_dir: root.path().join("quarantine"),
+            rules_dir: root.path().join("rules"),
+        };
+        paths.ensure().unwrap();
+        let database = Database::open(&paths.database).unwrap();
+        let mut report = AnalysisReportV1::new(FileEvidence {
+            display_path: source.to_string_lossy().into_owned(),
+            sha256: Some(hash.clone()),
+            size: bytes.len() as u64,
+            ..FileEvidence::default()
+        });
+        report.verdict = Verdict::Suspicious;
+        report.policy.action = PolicyAction::RequireReview;
+        report
+            .policy
+            .reasons
+            .push("Suspicious test evidence".into());
+        database.store_report(&report).unwrap();
+
+        execute_user_decision(
+            report.report_id,
+            UserDecision::Quarantine,
+            DecisionSource::Desktop,
+            &config,
+            &database,
+            &paths,
+        )
+        .unwrap();
+        restore_quarantine_from_desktop(&database, &config, &paths, &hash, "restored.exe").unwrap();
+
+        let snapshot = load_snapshot(&config, &database, &paths).unwrap();
+        assert_eq!(snapshot.questionable.len(), 1);
+        assert_eq!(snapshot.questionable[0].summary.file_name, "restored.exe");
+        assert_eq!(snapshot.questionable[0].summary.user_decision, None);
     }
 }
