@@ -120,6 +120,20 @@ pub struct SoftwareIdentityGroup {
     pub certificates: Vec<SignatureGroup>,
 }
 
+impl SoftwareIdentityGroup {
+    pub fn risk_state(&self) -> SignatureState {
+        self.certificates
+            .iter()
+            .map(|certificate| certificate.state)
+            .min()
+            .unwrap_or(SignatureState::Unknown)
+    }
+
+    pub fn starts_expanded(&self) -> bool {
+        self.risk_state() != SignatureState::Valid
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SignatureGroup {
     pub signer: String,
@@ -175,9 +189,13 @@ pub fn group_products_by_software(report: &AnalysisReportV1) -> Vec<SoftwareIden
 
     let mut groups: Vec<_> = groups.into_values().collect();
     groups.sort_by(|left, right| {
-        left.product_name
-            .to_ascii_lowercase()
-            .cmp(&right.product_name.to_ascii_lowercase())
+        left.risk_state()
+            .cmp(&right.risk_state())
+            .then_with(|| {
+                left.product_name
+                    .to_ascii_lowercase()
+                    .cmp(&right.product_name.to_ascii_lowercase())
+            })
             .then_with(|| {
                 left.product_version
                     .as_deref()
@@ -856,6 +874,59 @@ mod tests {
             Some("Example Corporation")
         );
         assert_eq!(groups[0].certificates.len(), 2);
+    }
+
+    #[test]
+    fn software_identities_sort_by_worst_verification_state() {
+        let mut report = AnalysisReportV1::new(FileEvidence {
+            display_path: r"C:\Users\example\Downloads\bundle.zip".into(),
+            ..FileEvidence::default()
+        });
+        for (name, fingerprint, digest_valid) in [
+            ("Valid Product", Some("1".repeat(64)), Some(true)),
+            ("Unsigned Product", None, None),
+            ("Unverified Product", Some("2".repeat(64)), None),
+            ("Invalid Product", Some("3".repeat(64)), Some(false)),
+        ] {
+            report.products.push(ProductIdentityEvidence {
+                product_name: Some(name.into()),
+                signer_identity: fingerprint.as_ref().map(|_| format!("CN={name} Publisher")),
+                signer_sha256: fingerprint,
+                signature_digest_valid: digest_valid,
+                nesting_path: Some(format!("{name}.exe")),
+                ..ProductIdentityEvidence::default()
+            });
+        }
+        report.components.push(crate::report::ComponentEvidence {
+            nesting_path: "Unsigned Product.exe".into(),
+            name: "Unsigned Product.exe".into(),
+            size: 1,
+            sha256: None,
+            formats: Vec::new(),
+            severity: Severity::High,
+            signed: Some(false),
+            evidence: Vec::new(),
+        });
+
+        let groups = group_products_by_software(&report);
+        assert_eq!(
+            groups
+                .iter()
+                .map(SoftwareIdentityGroup::risk_state)
+                .collect::<Vec<_>>(),
+            vec![
+                SignatureState::Invalid,
+                SignatureState::Unsigned,
+                SignatureState::Unverified,
+                SignatureState::Valid,
+            ]
+        );
+        assert!(!groups.last().expect("valid group").starts_expanded());
+        assert!(
+            groups[..3]
+                .iter()
+                .all(SoftwareIdentityGroup::starts_expanded)
+        );
     }
 
     #[test]

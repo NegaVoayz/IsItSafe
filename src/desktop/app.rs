@@ -1266,10 +1266,12 @@ fn render_software_group(
         .iter()
         .map(|certificate| certificate.products.len())
         .sum();
+    let risk = group.risk_state();
     let color = software_group_color(group);
     let summary = format!(
-        "{}  •  {} certificate{}, {}",
+        "{}  •  {}  •  {} certificate{}, {}",
         group.product_name,
+        risk.label(),
         group.certificates.len(),
         if group.certificates.len() == 1 {
             ""
@@ -1280,7 +1282,7 @@ fn render_software_group(
     );
     egui::CollapsingHeader::new(RichText::new(summary).size(13.0).strong().color(TEXT))
         .id_salt(("software-identity", index, &group.product_name))
-        .default_open(true)
+        .default_open(group.starts_expanded())
         .show(ui, |ui| {
             Frame::new()
                 .fill(PANEL_ALT)
