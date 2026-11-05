@@ -804,7 +804,12 @@ fn analyze_pe(path: &Path, data: &[u8], _limits: &AnalysisLimits, analysis: &mut
     if let Some(mismatch) = pe_extension_mismatch(path, data) {
         analysis.facts.push(mismatch);
     }
-    if let Some(product) = pe_product_identity(data, None) {
+    if let Some(product) = pe_product_identity(
+        data,
+        None,
+        path.file_name()
+            .map(|value| value.to_string_lossy().into_owned()),
+    ) {
         note_product_identity_mismatch(path, &product, analysis);
         analysis.products.push(product);
     }
@@ -2118,7 +2123,11 @@ fn select_signer_candidate(candidates: &[SignerCandidate]) -> Option<&SignerCand
 }
 
 fn record_pe_product(data: &[u8], nesting_path: &str, analysis: &mut ChildAnalysis) {
-    if let Some(product) = pe_product_identity(data, Some(nesting_path.to_string())) {
+    let fallback_name = Path::new(nesting_path)
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned());
+    if let Some(product) = pe_product_identity(data, Some(nesting_path.to_string()), fallback_name)
+    {
         analysis.products.push(product);
     }
 }
@@ -2126,27 +2135,39 @@ fn record_pe_product(data: &[u8], nesting_path: &str, analysis: &mut ChildAnalys
 fn pe_product_identity(
     data: &[u8],
     nesting_path: Option<String>,
+    fallback_name: Option<String>,
 ) -> Option<ProductIdentityEvidence> {
     let pe = goblin::pe::PE::parse(data).ok()?;
-    let version = pe.resource_data?.version_info?;
-    let strings = version.string_info;
+    let version = pe.resource_data.and_then(|resource| resource.version_info);
+    let strings = version.as_ref().map(|value| &value.string_info);
     let signer = pe_signer_identity(data);
     let product = ProductIdentityEvidence {
-        product_name: metadata_value(strings.product_name().as_deref()),
-        manufacturer: metadata_value(strings.company_name().as_deref()),
-        product_version: metadata_value(strings.product_version().as_deref()).or_else(|| {
-            version
-                .fixed_info
-                .map(|fixed| fixed.product_version().to_string())
-                .and_then(|value| metadata_value(Some(&value)))
-        }),
-        original_filename: metadata_value(strings.original_filename().as_deref()),
-        file_description: metadata_value(strings.file_description().as_deref()),
-        legal_copyright: metadata_value(strings.legal_copyright().as_deref()),
+        product_name: strings
+            .and_then(|value| metadata_value(value.product_name().as_deref()))
+            .or(fallback_name),
+        manufacturer: strings.and_then(|value| metadata_value(value.company_name().as_deref())),
+        product_version: strings
+            .and_then(|value| metadata_value(value.product_version().as_deref()))
+            .or_else(|| {
+                version
+                    .and_then(|value| value.fixed_info)
+                    .map(|fixed| fixed.product_version().to_string())
+                    .and_then(|value| metadata_value(Some(&value)))
+            }),
+        original_filename: strings
+            .and_then(|value| metadata_value(value.original_filename().as_deref())),
+        file_description: strings
+            .and_then(|value| metadata_value(value.file_description().as_deref())),
+        legal_copyright: strings
+            .and_then(|value| metadata_value(value.legal_copyright().as_deref())),
         signer_identity: signer.as_ref().map(|value| value.identity.clone()),
         signer_sha256: signer.as_ref().map(|value| value.sha256.clone()),
         signature_digest_valid: signer.as_ref().and_then(|value| value.digest_valid),
-        source: "PE version information".into(),
+        source: if version.is_some() {
+            "PE version information".into()
+        } else {
+            "PE filename fallback; version metadata unavailable".into()
+        },
         nesting_path,
         ..ProductIdentityEvidence::default()
     };
