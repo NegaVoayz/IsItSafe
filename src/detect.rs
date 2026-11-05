@@ -182,7 +182,7 @@ pub fn sniff(path: &Path, head: &[u8], tail: &[u8], total_size: u64) -> SniffRes
             category: "format".into(),
             severity: Severity::Medium,
             summary: format!(
-                "Filename extension .{extension} does not match detected content {actual_primary}"
+                "File extension .{extension} does not match its contents (detected: {actual_primary})"
             ),
             detail: None,
             provenance: "parent magic sniff".into(),
@@ -497,36 +497,6 @@ fn extension_mismatch(extension: &str, primary: &str) -> bool {
     if extension.is_empty() {
         return false;
     }
-    if primary == "unknown" {
-        return !matches!(
-            extension,
-            "txt"
-                | "text"
-                | "utf8"
-                | "md"
-                | "markdown"
-                | "json"
-                | "yaml"
-                | "yml"
-                | "toml"
-                | "ini"
-                | "xml"
-                | "c"
-                | "cc"
-                | "cpp"
-                | "cxx"
-                | "h"
-                | "hpp"
-                | "sln"
-                | "vcxproj"
-                | "filters"
-                | "comp"
-                | "frag"
-                | "vert"
-                | "obj"
-                | "rels"
-        );
-    }
     let compatible: &[&str] = match extension {
         "exe" | "dll" | "sys" => &["pe", "ole_cfb", "msi"],
         "msi" => &["ole_cfb", "msi"],
@@ -733,6 +703,19 @@ mod tests {
     #[test]
     fn office_relationship_extensions_are_recognized_as_text() {
         assert!(!extension_mismatch("rels", "unknown"));
+    }
+
+    #[test]
+    fn unknown_content_does_not_make_a_generic_extension_suspicious() {
+        assert!(!extension_mismatch("dat", "unknown"));
+        assert!(!extension_mismatch("resources", "unknown"));
+    }
+
+    #[test]
+    fn known_extensions_still_detect_contradictory_content() {
+        assert!(extension_mismatch("jpg", "pe"));
+        assert!(extension_mismatch("pdf", "zip"));
+        assert!(extension_mismatch("zip", "pe"));
     }
 
     #[test]

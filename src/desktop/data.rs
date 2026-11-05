@@ -252,7 +252,7 @@ pub fn compact_reason(reason: &str) -> String {
         return "Multiple embedded formats".into();
     }
     if lower.contains("extension") && lower.contains("does not match") {
-        return "Extension/content mismatch".into();
+        return "Extension does not match content".into();
     }
     if lower.contains("pdf") && lower.contains("active") {
         return "Active PDF content".into();
@@ -411,8 +411,8 @@ mod tests {
             "Name differs from embedded file"
         );
         assert_eq!(
-            compact_reason("Filename extension .rels does not match detected content unknown"),
-            "Extension/content mismatch"
+            compact_reason("File extension .jpg does not match its contents (detected: pe)"),
+            "Extension does not match content"
         );
         assert_eq!(
             compact_reason("The file exceeded a deep-analysis resource threshold"),
