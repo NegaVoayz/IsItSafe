@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use cross_authenticode::{AuthenticodeInfo, ToHex};
 use der::Encode;
 use rar_codec::{Archive as RarArchive, EntryKind as RarEntryKind};
@@ -881,20 +882,22 @@ fn analyze_pe(path: &Path, data: &[u8], _limits: &AnalysisLimits, analysis: &mut
                     Ok(value) => value,
                     Err(_) => continue,
                 };
-                let (subject, issuer, serial, ocsp_urls, crl_urls) = parse_certificate(&encoded);
+                let parsed = parse_certificate(&encoded);
                 let (code_signing, time_stamping) = certificate_usage(&encoded);
-                leaf_usage.insert(subject.clone(), (code_signing, time_stamping));
+                leaf_usage.insert(parsed.subject.clone(), (code_signing, time_stamping));
                 analysis.certificates.push(CertificateChainEvidence {
-                    subject,
-                    issuer,
-                    serial_number: serial,
+                    subject: parsed.subject,
+                    issuer: parsed.issuer,
+                    serial_number: parsed.serial,
                     sha256_fingerprint: certificate.sha256.to_hex(),
-                    ocsp_urls,
-                    crl_urls,
+                    ocsp_urls: parsed.ocsp_urls,
+                    crl_urls: parsed.crl_urls,
                     role: CertificateRole::Unknown,
                     root_trusted: None,
                     timestamp_present,
                     timestamp_time: None,
+                    not_before: parsed.not_before,
+                    not_after: parsed.not_after,
                     revocation: RevocationEvidence {
                         state: RevocationState::NotChecked,
                         ..RevocationEvidence::default()
@@ -1899,7 +1902,17 @@ fn inspect_magic_polyglots(data: &[u8], analysis: &mut ChildAnalysis) {
     }
 }
 
-fn parse_certificate(der: &[u8]) -> (String, String, String, Vec<String>, Vec<String>) {
+struct ParsedCertificate {
+    subject: String,
+    issuer: String,
+    serial: String,
+    ocsp_urls: Vec<String>,
+    crl_urls: Vec<String>,
+    not_before: Option<DateTime<Utc>>,
+    not_after: Option<DateTime<Utc>>,
+}
+
+fn parse_certificate(der: &[u8]) -> ParsedCertificate {
     let fallback_fingerprint = hex::encode(Sha256::digest(der));
     let mut urls = extract_urls(der);
     urls.sort();
@@ -1915,20 +1928,24 @@ fn parse_certificate(der: &[u8]) -> (String, String, String, Vec<String>, Vec<St
         .cloned()
         .collect();
     match X509Certificate::from_der(der) {
-        Ok((_, certificate)) => (
-            certificate.subject().to_string(),
-            certificate.issuer().to_string(),
-            certificate.raw_serial_as_string(),
+        Ok((_, certificate)) => ParsedCertificate {
+            subject: certificate.subject().to_string(),
+            issuer: certificate.issuer().to_string(),
+            serial: certificate.raw_serial_as_string(),
             ocsp_urls,
             crl_urls,
-        ),
-        Err(_) => (
-            "<unreadable certificate>".into(),
-            "<unreadable issuer>".into(),
-            fallback_fingerprint,
+            not_before: DateTime::from_timestamp(certificate.validity().not_before.timestamp(), 0),
+            not_after: DateTime::from_timestamp(certificate.validity().not_after.timestamp(), 0),
+        },
+        Err(_) => ParsedCertificate {
+            subject: "<unreadable certificate>".into(),
+            issuer: "<unreadable issuer>".into(),
+            serial: fallback_fingerprint,
             ocsp_urls,
             crl_urls,
-        ),
+            not_before: None,
+            not_after: None,
+        },
     }
 }
 
@@ -2048,6 +2065,8 @@ struct PeSignerIdentity {
     identity: String,
     sha256: String,
     digest_valid: Option<bool>,
+    not_before: Option<DateTime<Utc>>,
+    not_after: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug)]
@@ -2058,6 +2077,8 @@ struct SignerCandidate {
     time_stamping: bool,
     self_signed: bool,
     is_ca: bool,
+    not_before: Option<DateTime<Utc>>,
+    not_after: Option<DateTime<Utc>>,
 }
 
 fn pe_signer_identity(data: &[u8]) -> Option<PeSignerIdentity> {
@@ -2068,7 +2089,7 @@ fn pe_signer_identity(data: &[u8]) -> Option<PeSignerIdentity> {
         let Ok(encoded) = certificate.certificate.to_der() else {
             continue;
         };
-        let (subject, issuer, _, _, _) = parse_certificate(&encoded);
+        let parsed = parse_certificate(&encoded);
         let (code_signing, time_stamping) = certificate_usage(&encoded);
         let is_ca = match X509Certificate::from_der(&encoded) {
             Ok((_, certificate)) => certificate
@@ -2079,12 +2100,14 @@ fn pe_signer_identity(data: &[u8]) -> Option<PeSignerIdentity> {
             Err(_) => false,
         };
         candidates.push(SignerCandidate {
-            self_signed: subject == issuer,
-            identity: subject,
+            self_signed: parsed.subject == parsed.issuer,
+            identity: parsed.subject,
             sha256: certificate.sha256.to_hex(),
             code_signing,
             time_stamping,
             is_ca,
+            not_before: parsed.not_before,
+            not_after: parsed.not_after,
         });
     }
     let selected = select_signer_candidate(&candidates)?;
@@ -2092,6 +2115,8 @@ fn pe_signer_identity(data: &[u8]) -> Option<PeSignerIdentity> {
         identity: selected.identity.clone(),
         sha256: selected.sha256.clone(),
         digest_valid,
+        not_before: selected.not_before,
+        not_after: selected.not_after,
     })
 }
 
@@ -2163,6 +2188,8 @@ fn pe_product_identity(
         signer_identity: signer.as_ref().map(|value| value.identity.clone()),
         signer_sha256: signer.as_ref().map(|value| value.sha256.clone()),
         signature_digest_valid: signer.as_ref().and_then(|value| value.digest_valid),
+        signature_not_before: signer.as_ref().and_then(|value| value.not_before),
+        signature_not_after: signer.as_ref().and_then(|value| value.not_after),
         source: if version.is_some() {
             "PE version information".into()
         } else {
@@ -2394,6 +2421,8 @@ mod tests {
                 time_stamping: false,
                 self_signed: true,
                 is_ca: true,
+                not_before: None,
+                not_after: None,
             },
             SignerCandidate {
                 identity: "Example Publisher".into(),
@@ -2402,6 +2431,8 @@ mod tests {
                 time_stamping: false,
                 self_signed: false,
                 is_ca: false,
+                not_before: None,
+                not_after: None,
             },
         ];
         assert_eq!(

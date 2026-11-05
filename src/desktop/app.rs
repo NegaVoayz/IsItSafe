@@ -1369,11 +1369,12 @@ fn render_signature_group(ui: &mut egui::Ui, group: &super::data::SignatureGroup
 
 fn signature_color(state: SignatureState) -> Color32 {
     match state {
-        SignatureState::Invalid => DANGER,
+        SignatureState::Invalid | SignatureState::Revoked | SignatureState::Expired => DANGER,
+        SignatureState::NotYetValid => WARNING,
         SignatureState::Unsigned => WARNING,
         SignatureState::Unknown => MUTED,
         SignatureState::Unverified => BLUE,
-        SignatureState::Verified => ACCENT,
+        SignatureState::Valid => ACCENT,
     }
 }
 

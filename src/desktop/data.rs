@@ -88,20 +88,26 @@ pub struct DesktopSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SignatureState {
     Invalid,
+    Revoked,
+    Expired,
+    NotYetValid,
     Unsigned,
     Unknown,
     Unverified,
-    Verified,
+    Valid,
 }
 
 impl SignatureState {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Invalid => "Invalid signature",
-            Self::Unsigned => "No signature",
-            Self::Unknown => "Signer unknown",
-            Self::Unverified => "Signed, unverified",
-            Self::Verified => "Signature digest valid",
+            Self::Invalid => "Invalid",
+            Self::Revoked => "Revoked",
+            Self::Expired => "Expired",
+            Self::NotYetValid => "Not Yet Valid",
+            Self::Unsigned => "Unsigned",
+            Self::Unknown => "Unknown",
+            Self::Unverified => "Unverified",
+            Self::Valid => "Valid",
         }
     }
 }
@@ -143,6 +149,19 @@ pub fn group_products_by_signature(report: &AnalysisReportV1) -> Vec<SignatureGr
         let digest_valid = product
             .signature_digest_valid
             .or_else(|| authenticity.and_then(|value| value.signature_digest_valid));
+        let certificate = fingerprint.as_deref().and_then(|fingerprint| {
+            report.certificates.iter().find(|certificate| {
+                certificate
+                    .sha256_fingerprint
+                    .eq_ignore_ascii_case(fingerprint)
+            })
+        });
+        let not_before = product
+            .signature_not_before
+            .or_else(|| certificate.and_then(|value| value.not_before));
+        let not_after = product
+            .signature_not_after
+            .or_else(|| certificate.and_then(|value| value.not_after));
         let signed = component.and_then(|value| value.signed).or_else(|| {
             (top_level
                 && authenticity.is_some_and(|value| {
@@ -150,12 +169,21 @@ pub fn group_products_by_signature(report: &AnalysisReportV1) -> Vec<SignatureGr
                 }))
             .then_some(true)
         });
+        let now = Utc::now();
         let state = if digest_valid == Some(false) {
             SignatureState::Invalid
+        } else if certificate
+            .is_some_and(|value| value.revocation.state == crate::report::RevocationState::Revoked)
+        {
+            SignatureState::Revoked
+        } else if not_after.is_some_and(|value| now > value) {
+            SignatureState::Expired
+        } else if not_before.is_some_and(|value| now < value) {
+            SignatureState::NotYetValid
         } else if signed == Some(false) {
             SignatureState::Unsigned
         } else if digest_valid == Some(true) {
-            SignatureState::Verified
+            SignatureState::Valid
         } else if signer.is_some() || signed == Some(true) {
             SignatureState::Unverified
         } else {
@@ -169,7 +197,10 @@ pub fn group_products_by_signature(report: &AnalysisReportV1) -> Vec<SignatureGr
                 SignatureState::Unsigned => "No signature".into(),
                 SignatureState::Unknown => "Signer unknown".into(),
                 SignatureState::Unverified => "Signer unavailable".into(),
-                SignatureState::Verified => "Verified signer".into(),
+                SignatureState::Valid => "Verified signer".into(),
+                SignatureState::Revoked => "Revoked certificate".into(),
+                SignatureState::Expired => "Expired certificate".into(),
+                SignatureState::NotYetValid => "Certificate not yet valid".into(),
             });
         let key = match (&fingerprint, state) {
             (Some(fingerprint), _) => format!("{}:{fingerprint}", state as u8),
@@ -684,7 +715,7 @@ mod tests {
             .find(|group| group.signer == "Example Corp Code Signing")
             .expect("signed group");
         assert_eq!(signed.products.len(), 2);
-        assert_eq!(signed.state, SignatureState::Verified);
+        assert_eq!(signed.state, SignatureState::Valid);
         let unsigned = groups
             .iter()
             .find(|group| group.state == SignatureState::Unsigned)
@@ -693,6 +724,36 @@ mod tests {
             unsigned.products[0].product_name.as_deref(),
             Some("Hidden Payload")
         );
+    }
+
+    #[test]
+    fn signature_status_labels_are_compact() {
+        assert_eq!(SignatureState::Valid.label(), "Valid");
+        assert_eq!(SignatureState::Unsigned.label(), "Unsigned");
+        assert_eq!(SignatureState::Revoked.label(), "Revoked");
+        assert_eq!(SignatureState::Expired.label(), "Expired");
+        assert_eq!(SignatureState::NotYetValid.label(), "Not Yet Valid");
+    }
+
+    #[test]
+    fn expired_signer_metadata_takes_precedence_over_a_valid_digest() {
+        let mut report = AnalysisReportV1::new(FileEvidence {
+            display_path: r"C:\Users\example\Downloads\expired.exe".into(),
+            ..FileEvidence::default()
+        });
+        report.products.push(ProductIdentityEvidence {
+            product_name: Some("Expired Product".into()),
+            signer_identity: Some("CN=Expired Publisher".into()),
+            signer_sha256: Some("e".repeat(64)),
+            signature_digest_valid: Some(true),
+            signature_not_before: Some(Utc::now() - chrono::Duration::days(30)),
+            signature_not_after: Some(Utc::now() - chrono::Duration::days(1)),
+            nesting_path: Some("expired.exe".into()),
+            ..ProductIdentityEvidence::default()
+        });
+
+        let groups = group_products_by_signature(&report);
+        assert_eq!(groups[0].state, SignatureState::Expired);
     }
 
     #[test]

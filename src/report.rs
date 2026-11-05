@@ -459,6 +459,10 @@ pub struct CertificateChainEvidence {
     pub root_trusted: Option<bool>,
     pub timestamp_present: bool,
     pub timestamp_time: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub not_before: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub not_after: Option<DateTime<Utc>>,
     pub revocation: RevocationEvidence,
 }
 
@@ -568,6 +572,10 @@ pub struct ProductIdentityEvidence {
     pub signer_sha256: Option<String>,
     #[serde(default)]
     pub signature_digest_valid: Option<bool>,
+    #[serde(default)]
+    pub signature_not_before: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub signature_not_after: Option<DateTime<Utc>>,
     pub source: String,
     pub nesting_path: Option<String>,
 }
