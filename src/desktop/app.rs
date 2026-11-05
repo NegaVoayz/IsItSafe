@@ -21,7 +21,8 @@ use crate::report::{
 use super::actions::Worker;
 use super::actions::{WorkerEvent, WorkerRequest};
 use super::data::{
-    DesktopSnapshot, RiskGroup, compact_reason, format_size, reputation_subject, severity_label,
+    DesktopSnapshot, RiskGroup, SignatureState, compact_reason, format_size,
+    group_products_by_signature, reputation_subject, severity_label,
 };
 
 const CANVAS: Color32 = Color32::from_rgb(12, 16, 15);
@@ -706,18 +707,19 @@ impl DesktopApp {
 
                 if !report.products.is_empty() {
                     ui.add_space(10.0);
+                    let groups = group_products_by_signature(report);
                     egui::CollapsingHeader::new(
                         RichText::new(format!(
-                            "Detected software identity ({})",
-                            report.products.len()
+                            "Software identities by signer ({} groups)",
+                            groups.len()
                         ))
                         .strong()
                         .color(TEXT),
                     )
                     .default_open(true)
                     .show(ui, |ui| {
-                        for product in &report.products {
-                            render_product_identity(ui, product);
+                        for (index, group) in groups.iter().enumerate() {
+                            render_signature_group(ui, group, index);
                         }
                     });
                 }
@@ -1295,6 +1297,12 @@ fn render_product_identity(ui: &mut egui::Ui, product: &ProductIdentityEvidence)
             if let Some(copyright) = &product.legal_copyright {
                 key_value(ui, "Copyright", copyright);
             }
+            if let Some(signer) = &product.signer_identity {
+                key_value(ui, "Signer", signer);
+            }
+            if let Some(fingerprint) = &product.signer_sha256 {
+                key_value(ui, "Certificate SHA-256", fingerprint);
+            }
             key_value(
                 ui,
                 "Evidence source",
@@ -1302,6 +1310,66 @@ fn render_product_identity(ui: &mut egui::Ui, product: &ProductIdentityEvidence)
             );
         });
     ui.add_space(5.0);
+}
+
+fn render_signature_group(ui: &mut egui::Ui, group: &super::data::SignatureGroup, index: usize) {
+    let color = signature_color(group.state);
+    let certificate = group
+        .certificate_sha256
+        .as_deref()
+        .map(|value| format!("  ·  cert {}", &value[..value.len().min(8)]))
+        .unwrap_or_default();
+    egui::CollapsingHeader::new(
+        RichText::new(format!(
+            "{}  ·  {}  ·  {} file{}{}",
+            group.signer,
+            group.state.label(),
+            group.products.len(),
+            if group.products.len() == 1 { "" } else { "s" },
+            certificate
+        ))
+        .size(13.0)
+        .strong()
+        .color(color),
+    )
+    .id_salt(("signature-group", index, &group.signer))
+    .default_open(matches!(
+        group.state,
+        SignatureState::Invalid | SignatureState::Unsigned
+    ))
+    .show(ui, |ui| {
+        if let Some(fingerprint) = &group.certificate_sha256 {
+            key_value(ui, "Certificate SHA-256", fingerprint);
+        }
+        for (product_index, product) in group.products.iter().enumerate() {
+            let name = product
+                .product_name
+                .as_deref()
+                .unwrap_or("<unnamed product>");
+            let carrier = product
+                .nesting_path
+                .as_deref()
+                .unwrap_or("the downloaded file");
+            egui::CollapsingHeader::new(
+                RichText::new(format!("{name}  ·  {carrier}"))
+                    .size(11.5)
+                    .color(TEXT),
+            )
+            .id_salt(("signature-product", index, product_index, carrier))
+            .default_open(false)
+            .show(ui, |ui| render_product_identity(ui, product));
+        }
+    });
+}
+
+fn signature_color(state: SignatureState) -> Color32 {
+    match state {
+        SignatureState::Invalid => DANGER,
+        SignatureState::Unsigned => WARNING,
+        SignatureState::Unknown => MUTED,
+        SignatureState::Unverified => BLUE,
+        SignatureState::Verified => ACCENT,
+    }
 }
 
 fn render_reputation(ui: &mut egui::Ui, report: &AnalysisReportV1) {

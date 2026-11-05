@@ -7,7 +7,9 @@ use chrono::{DateTime, Utc};
 use crate::capture::escape_controls;
 use crate::config::{AppPaths, Config};
 use crate::db::{Database, normalize_path};
-use crate::report::{AnalysisReportV1, ReportSummary, Severity, Verdict};
+use crate::report::{
+    AnalysisReportV1, CertificateRole, ProductIdentityEvidence, ReportSummary, Severity, Verdict,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RiskGroup {
@@ -81,6 +83,146 @@ impl QuarantineItem {
 pub struct DesktopSnapshot {
     pub questionable: Vec<QuestionableFile>,
     pub quarantine: Vec<QuarantineItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SignatureState {
+    Invalid,
+    Unsigned,
+    Unknown,
+    Unverified,
+    Verified,
+}
+
+impl SignatureState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Invalid => "Invalid signature",
+            Self::Unsigned => "No signature",
+            Self::Unknown => "Signer unknown",
+            Self::Unverified => "Signed, unverified",
+            Self::Verified => "Signature digest valid",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SignatureGroup {
+    pub signer: String,
+    pub certificate_sha256: Option<String>,
+    pub state: SignatureState,
+    pub products: Vec<ProductIdentityEvidence>,
+}
+
+pub fn group_products_by_signature(report: &AnalysisReportV1) -> Vec<SignatureGroup> {
+    use std::collections::BTreeMap;
+
+    let top_level_fingerprint = report
+        .certificates
+        .iter()
+        .find(|certificate| certificate.role == CertificateRole::Leaf)
+        .map(|certificate| certificate.sha256_fingerprint.clone());
+    let mut groups: BTreeMap<String, SignatureGroup> = BTreeMap::new();
+    for product in &report.products {
+        let component = product.nesting_path.as_deref().and_then(|path| {
+            report
+                .components
+                .iter()
+                .find(|component| component.nesting_path == path)
+        });
+        let top_level = product.nesting_path.is_none();
+        let authenticity = top_level.then_some(report.authenticity.as_ref()).flatten();
+        let signer = product
+            .signer_identity
+            .clone()
+            .or_else(|| authenticity.and_then(|value| value.publisher_identity.clone()));
+        let fingerprint = product
+            .signer_sha256
+            .clone()
+            .or_else(|| top_level.then_some(top_level_fingerprint.clone()).flatten());
+        let digest_valid = product
+            .signature_digest_valid
+            .or_else(|| authenticity.and_then(|value| value.signature_digest_valid));
+        let signed = component.and_then(|value| value.signed).or_else(|| {
+            (top_level
+                && authenticity.is_some_and(|value| {
+                    value.publisher_identity.is_some() || value.signature_digest_valid.is_some()
+                }))
+            .then_some(true)
+        });
+        let state = if digest_valid == Some(false) {
+            SignatureState::Invalid
+        } else if signed == Some(false) {
+            SignatureState::Unsigned
+        } else if digest_valid == Some(true) {
+            SignatureState::Verified
+        } else if signer.is_some() || signed == Some(true) {
+            SignatureState::Unverified
+        } else {
+            SignatureState::Unknown
+        };
+        let signer = signer
+            .as_deref()
+            .map(compact_signer_name)
+            .unwrap_or_else(|| match state {
+                SignatureState::Invalid => "Invalid signature".into(),
+                SignatureState::Unsigned => "No signature".into(),
+                SignatureState::Unknown => "Signer unknown".into(),
+                SignatureState::Unverified => "Signer unavailable".into(),
+                SignatureState::Verified => "Verified signer".into(),
+            });
+        let key = match (&fingerprint, state) {
+            (Some(fingerprint), _) => format!("{}:{fingerprint}", state as u8),
+            _ => format!("{}:{signer}", state as u8).to_ascii_lowercase(),
+        };
+        groups
+            .entry(key)
+            .and_modify(|group| group.products.push(product.clone()))
+            .or_insert_with(|| SignatureGroup {
+                signer,
+                certificate_sha256: fingerprint,
+                state,
+                products: vec![product.clone()],
+            });
+    }
+    for group in groups.values_mut() {
+        group.products.sort_by(|left, right| {
+            left.product_name
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .cmp(
+                    &right
+                        .product_name
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_ascii_lowercase(),
+                )
+                .then_with(|| left.nesting_path.cmp(&right.nesting_path))
+        });
+    }
+    let mut groups: Vec<_> = groups.into_values().collect();
+    groups.sort_by(|left, right| {
+        left.state.cmp(&right.state).then_with(|| {
+            left.signer
+                .to_ascii_lowercase()
+                .cmp(&right.signer.to_ascii_lowercase())
+        })
+    });
+    groups
+}
+
+fn compact_signer_name(identity: &str) -> String {
+    for attribute in ["CN=", "O="] {
+        if let Some(start) = identity.find(attribute) {
+            let value = &identity[start + attribute.len()..];
+            let value = value.split(',').next().unwrap_or(value).trim();
+            if !value.is_empty() {
+                return value.to_string();
+            }
+        }
+    }
+    identity.to_string()
 }
 
 impl DesktopSnapshot {
@@ -486,6 +628,70 @@ mod tests {
         assert_eq!(
             reputation_subject(&report, &"c".repeat(64)),
             "Hash: cccccccccccc..."
+        );
+    }
+
+    #[test]
+    fn software_identities_group_by_certificate_and_keep_unsigned_separate() {
+        let mut report = AnalysisReportV1::new(FileEvidence {
+            display_path: r"C:\Users\example\Downloads\bundle.zip".into(),
+            sha256: Some("a".repeat(64)),
+            ..FileEvidence::default()
+        });
+        let signed_product = |name: &str, path: &str| ProductIdentityEvidence {
+            product_name: Some(name.into()),
+            signer_identity: Some("C=US, O=Example Corp, CN=Example Corp Code Signing".into()),
+            signer_sha256: Some("b".repeat(64)),
+            signature_digest_valid: Some(true),
+            nesting_path: Some(path.into()),
+            ..ProductIdentityEvidence::default()
+        };
+        report
+            .products
+            .push(signed_product("Example App", "Example.exe"));
+        report
+            .products
+            .push(signed_product("Example Runtime", "Example.dll"));
+        report.products.push(ProductIdentityEvidence {
+            product_name: Some("Hidden Payload".into()),
+            nesting_path: Some("payload.dll".into()),
+            ..ProductIdentityEvidence::default()
+        });
+        report.components.push(crate::report::ComponentEvidence {
+            nesting_path: "Example.exe".into(),
+            name: "Example.exe".into(),
+            size: 1,
+            sha256: Some("c".repeat(64)),
+            formats: Vec::new(),
+            severity: Severity::Info,
+            signed: Some(true),
+            evidence: Vec::new(),
+        });
+        report.components.push(crate::report::ComponentEvidence {
+            nesting_path: "payload.dll".into(),
+            name: "payload.dll".into(),
+            size: 1,
+            sha256: Some("d".repeat(64)),
+            formats: Vec::new(),
+            severity: Severity::High,
+            signed: Some(false),
+            evidence: Vec::new(),
+        });
+
+        let groups = group_products_by_signature(&report);
+        let signed = groups
+            .iter()
+            .find(|group| group.signer == "Example Corp Code Signing")
+            .expect("signed group");
+        assert_eq!(signed.products.len(), 2);
+        assert_eq!(signed.state, SignatureState::Verified);
+        let unsigned = groups
+            .iter()
+            .find(|group| group.state == SignatureState::Unsigned)
+            .expect("unsigned group");
+        assert_eq!(
+            unsigned.products[0].product_name.as_deref(),
+            Some("Hidden Payload")
         );
     }
 

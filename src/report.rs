@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: &str = "1.1";
+pub const SCHEMA_VERSION: &str = "1.2";
 pub const REPORT_SUMMARY_SCHEMA_VERSION: &str = "1.0";
 pub const LIMITATION_NOTICE: &str =
     "Static analysis found no high-risk content; this does not prove runtime safety.";
@@ -562,6 +562,9 @@ pub struct ProductIdentityEvidence {
     pub original_filename: Option<String>,
     pub file_description: Option<String>,
     pub legal_copyright: Option<String>,
+    pub signer_identity: Option<String>,
+    pub signer_sha256: Option<String>,
+    pub signature_digest_valid: Option<bool>,
     pub source: String,
     pub nesting_path: Option<String>,
 }

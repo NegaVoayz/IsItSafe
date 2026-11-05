@@ -2039,6 +2039,84 @@ fn sign_status(data: &[u8]) -> Option<bool> {
     Some(pe_has_signature_table(data))
 }
 
+struct PeSignerIdentity {
+    identity: String,
+    sha256: String,
+    digest_valid: Option<bool>,
+}
+
+#[derive(Debug)]
+struct SignerCandidate {
+    identity: String,
+    sha256: String,
+    code_signing: bool,
+    time_stamping: bool,
+    self_signed: bool,
+    is_ca: bool,
+}
+
+fn pe_signer_identity(data: &[u8]) -> Option<PeSignerIdentity> {
+    let info = AuthenticodeInfo::try_from(data).ok()?;
+    let digest_valid = info.verify().ok();
+    let mut candidates = Vec::new();
+    for certificate in info.certificates.iter() {
+        let Ok(encoded) = certificate.certificate.to_der() else {
+            continue;
+        };
+        let (subject, issuer, _, _, _) = parse_certificate(&encoded);
+        let (code_signing, time_stamping) = certificate_usage(&encoded);
+        let is_ca = match X509Certificate::from_der(&encoded) {
+            Ok((_, certificate)) => certificate
+                .basic_constraints()
+                .ok()
+                .flatten()
+                .is_some_and(|constraints| constraints.value.ca),
+            Err(_) => false,
+        };
+        candidates.push(SignerCandidate {
+            self_signed: subject == issuer,
+            identity: subject,
+            sha256: certificate.sha256.to_hex(),
+            code_signing,
+            time_stamping,
+            is_ca,
+        });
+    }
+    let selected = select_signer_candidate(&candidates)?;
+    Some(PeSignerIdentity {
+        identity: selected.identity.clone(),
+        sha256: selected.sha256.clone(),
+        digest_valid,
+    })
+}
+
+fn select_signer_candidate(candidates: &[SignerCandidate]) -> Option<&SignerCandidate> {
+    candidates
+        .iter()
+        .find(|candidate| {
+            candidate.code_signing
+                && !candidate.time_stamping
+                && !candidate.self_signed
+                && !candidate.is_ca
+        })
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|candidate| candidate.code_signing && !candidate.is_ca)
+        })
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|candidate| !candidate.time_stamping && !candidate.is_ca)
+        })
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|candidate| candidate.code_signing && !candidate.time_stamping)
+        })
+        .or_else(|| candidates.first())
+}
+
 fn record_pe_product(data: &[u8], nesting_path: &str, analysis: &mut ChildAnalysis) {
     if let Some(product) = pe_product_identity(data, Some(nesting_path.to_string())) {
         analysis.products.push(product);
@@ -2052,6 +2130,7 @@ fn pe_product_identity(
     let pe = goblin::pe::PE::parse(data).ok()?;
     let version = pe.resource_data?.version_info?;
     let strings = version.string_info;
+    let signer = pe_signer_identity(data);
     let product = ProductIdentityEvidence {
         product_name: metadata_value(strings.product_name().as_deref()),
         manufacturer: metadata_value(strings.company_name().as_deref()),
@@ -2064,6 +2143,9 @@ fn pe_product_identity(
         original_filename: metadata_value(strings.original_filename().as_deref()),
         file_description: metadata_value(strings.file_description().as_deref()),
         legal_copyright: metadata_value(strings.legal_copyright().as_deref()),
+        signer_identity: signer.as_ref().map(|value| value.identity.clone()),
+        signer_sha256: signer.as_ref().map(|value| value.sha256.clone()),
+        signature_digest_valid: signer.as_ref().and_then(|value| value.digest_valid),
         source: "PE version information".into(),
         nesting_path,
         ..ProductIdentityEvidence::default()
@@ -2279,6 +2361,34 @@ mod tests {
             ("Google LLC".into(), true, false),
         ];
         assert_eq!(select_publisher(&candidates).as_deref(), Some("Google LLC"));
+    }
+
+    #[test]
+    fn product_signer_prefers_the_code_signing_leaf_over_the_root() {
+        let candidates = vec![
+            SignerCandidate {
+                identity: "Sectigo Root".into(),
+                sha256: "a".repeat(64),
+                code_signing: true,
+                time_stamping: false,
+                self_signed: true,
+                is_ca: true,
+            },
+            SignerCandidate {
+                identity: "Example Publisher".into(),
+                sha256: "b".repeat(64),
+                code_signing: true,
+                time_stamping: false,
+                self_signed: false,
+                is_ca: false,
+            },
+        ];
+        assert_eq!(
+            select_signer_candidate(&candidates)
+                .expect("signer")
+                .identity,
+            "Example Publisher"
+        );
     }
 
     #[test]
