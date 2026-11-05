@@ -63,6 +63,7 @@ pub(super) struct DesktopApp {
     restore_prompt: Option<RestorePrompt>,
     status: Option<StatusMessage>,
     busy: bool,
+    busy_message: Option<&'static str>,
     monitor_running: bool,
     last_refresh: Instant,
     last_monitor_check: Instant,
@@ -89,6 +90,7 @@ impl DesktopApp {
             restore_prompt: None,
             status: None,
             busy: false,
+            busy_message: None,
             monitor_running,
             last_refresh: Instant::now(),
             last_monitor_check: Instant::now(),
@@ -109,8 +111,10 @@ impl DesktopApp {
         self.selected_report_id = Some(report_id);
         self.selected_report = None;
         self.busy = true;
+        self.busy_message = Some("Loading stored report…");
         if let Err(error) = self.worker.send(WorkerRequest::LoadReport(report_id)) {
             self.busy = false;
+            self.busy_message = None;
             self.status = Some(StatusMessage {
                 text: error,
                 error: true,
@@ -123,9 +127,11 @@ impl DesktopApp {
             return;
         }
         self.busy = true;
+        self.busy_message = Some("Quarantining file after SHA-256 verification…");
         self.status = None;
         if let Err(error) = self.worker.send(WorkerRequest::Quarantine(report_id)) {
             self.busy = false;
+            self.busy_message = None;
             self.status = Some(StatusMessage {
                 text: error,
                 error: true,
@@ -155,6 +161,7 @@ impl DesktopApp {
                 WorkerEvent::ReportLoaded { report_id, result } => {
                     if self.selected_report_id == Some(report_id) {
                         self.busy = false;
+                        self.busy_message = None;
                         match result {
                             Ok(Some(report)) => {
                                 self.selected_report = Some(*report);
@@ -176,6 +183,7 @@ impl DesktopApp {
                 }
                 WorkerEvent::ActionFinished { message, snapshot } => {
                     self.busy = false;
+                    self.busy_message = None;
                     match message {
                         Ok(text) => {
                             self.status = Some(StatusMessage { text, error: false });
@@ -802,17 +810,29 @@ impl DesktopApp {
     }
 
     fn render_status(&self, ui: &mut egui::Ui) {
-        let Some(status) = &self.status else {
+        if let Some(status) = &self.status {
+            let color = if status.error { DANGER } else { ACCENT };
+            Frame::new()
+                .fill(color.gamma_multiply(0.12))
+                .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(&status.text).size(11.5).color(color));
+                });
+        } else if let Some(message) = self.busy_message {
+            Frame::new()
+                .fill(BLUE.gamma_multiply(0.10))
+                .stroke(Stroke::new(1.0, BLUE.gamma_multiply(0.35)))
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new(message).size(11.5).color(BLUE));
+                    });
+                });
+        } else {
             return;
-        };
-        let color = if status.error { DANGER } else { ACCENT };
-        Frame::new()
-            .fill(color.gamma_multiply(0.12))
-            .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
-            .inner_margin(egui::Margin::symmetric(12, 8))
-            .show(ui, |ui| {
-                ui.label(RichText::new(&status.text).size(11.5).color(color));
-            });
+        }
         ui.add_space(10.0);
     }
 
@@ -886,12 +906,14 @@ impl DesktopApp {
 
         if confirmed {
             self.busy = true;
+            self.busy_message = Some("Restoring file to Downloads…");
             self.status = None;
             if let Err(error) = self.worker.send(WorkerRequest::Restore {
                 sha256: prompt.sha256,
                 file_name: prompt.file_name,
             }) {
                 self.busy = false;
+                self.busy_message = None;
                 self.status = Some(StatusMessage {
                     text: error,
                     error: true,
