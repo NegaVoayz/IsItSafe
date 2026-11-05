@@ -1337,7 +1337,15 @@ fn render_certificate_group(
                     group.state,
                     SignatureState::Unsigned | SignatureState::Unknown
                 ) {
-                    ui.label(RichText::new(&group.signer).size(12.0).strong().color(TEXT));
+                    let full_signer = group
+                        .products
+                        .iter()
+                        .find_map(|product| product.signer_identity.as_deref());
+                    let signer =
+                        ui.label(RichText::new(&group.signer).size(12.0).strong().color(TEXT));
+                    if let Some(full_signer) = full_signer.filter(|value| *value != group.signer) {
+                        signer.on_hover_text(full_signer);
+                    }
                 }
                 signature_badge(ui, group.state);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1348,14 +1356,6 @@ fn render_certificate_group(
                     );
                 });
             });
-            if let Some(signer) = group
-                .products
-                .iter()
-                .find_map(|product| product.signer_identity.as_deref())
-                && signer != group.signer
-            {
-                key_value(ui, "Signer", signer);
-            }
             if let Some(fingerprint) = &group.certificate_sha256 {
                 key_value(ui, "SHA-256", fingerprint);
             }
