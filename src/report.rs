@@ -122,7 +122,9 @@ pub struct ReportSummary {
 fn concise_reasons(report: &AnalysisReportV1) -> Vec<String> {
     let mut reasons = Vec::new();
     for reason in &report.policy.reasons {
-        if reason.starts_with("Waiting for a Keep, Quarantine, or Remove") {
+        if reason.starts_with("Waiting for a Keep, Quarantine, or Remove")
+            || reason.starts_with("The user ")
+        {
             continue;
         }
         push_unique(&mut reasons, reason.clone());
@@ -712,6 +714,10 @@ mod tests {
             .policy
             .reasons
             .push("Waiting for a Keep, Quarantine, or Remove notification action".into());
+        report
+            .policy
+            .reasons
+            .push("The user restored the file to Downloads as setup.exe".into());
         let summary = report.summary();
         assert_eq!(summary.file_name, "setup.exe");
         assert_eq!(summary.verdict, Verdict::Suspicious);

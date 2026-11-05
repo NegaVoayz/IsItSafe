@@ -120,6 +120,7 @@ fn sanitize_report_for_display(report: &mut AnalysisReportV1) {
         .policy
         .reasons
         .iter()
+        .filter(|value| !value.starts_with("The user "))
         .map(|value| escape_controls(value))
         .collect();
     for evidence in report.facts.iter_mut().chain(report.inference.iter_mut()) {
@@ -163,5 +164,28 @@ fn sanitize_report_for_display(report: &mut AnalysisReportV1) {
             .as_deref()
             .map(escape_controls);
         authenticity.detail = authenticity.detail.as_deref().map(escape_controls);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::report::FileEvidence;
+
+    #[test]
+    fn user_action_history_is_not_displayed_as_policy_evidence() {
+        let mut report = AnalysisReportV1::new(FileEvidence {
+            display_path: "sample.exe".into(),
+            ..FileEvidence::default()
+        });
+        report.policy.reasons.push("Unsigned executable".into());
+        report
+            .policy
+            .reasons
+            .push("The user restored the file to Downloads as sample.exe".into());
+
+        sanitize_report_for_display(&mut report);
+
+        assert_eq!(report.policy.reasons, vec!["Unsigned executable"]);
     }
 }

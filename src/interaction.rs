@@ -26,15 +26,6 @@ pub enum DecisionSource {
     Desktop,
 }
 
-impl DecisionSource {
-    fn phrase(self) -> &'static str {
-        match self {
-            Self::Notification => "the Windows notification",
-            Self::Desktop => "the desktop review workspace",
-        }
-    }
-}
-
 /// Returns true when a report is actionable enough to interrupt the user.
 pub fn should_notify(verdict: Verdict) -> bool {
     matches!(
@@ -157,19 +148,11 @@ pub fn execute_user_decision(
             report.policy.user_decision = Some(UserDecision::Keep);
             report.policy.quarantine_requested = false;
             report.policy.action = PolicyAction::Notify;
-            report
-                .policy
-                .reasons
-                .push(format!("The user kept the file from {}", source.phrase()));
         }
         UserDecision::Quarantine => {
             report.policy.user_decision = Some(UserDecision::Quarantine);
             report.policy.quarantine_requested = true;
             report.policy.action = PolicyAction::Quarantine;
-            report.policy.reasons.push(format!(
-                "The user quarantined the file from {}",
-                source.phrase()
-            ));
             match apply_quarantine(&report, config, database, &paths.quarantine_dir) {
                 Ok(Some(destination)) => {
                     report.policy.quarantine_path =
@@ -200,10 +183,6 @@ pub fn execute_user_decision(
                 return Err(error);
             }
             report.policy.action = PolicyAction::UserRemoved;
-            report.policy.reasons.push(format!(
-                "The user removed the file from {}",
-                source.phrase()
-            ));
         }
     }
 
@@ -289,9 +268,6 @@ pub fn restore_quarantine_from_desktop(
         report.policy.quarantine_requested = false;
         report.policy.quarantine_path = None;
         report.policy.action = PolicyAction::RequireReview;
-        report.policy.reasons.push(format!(
-            "The user restored the file to Downloads as {destination_name}; execution remains blocked"
-        ));
         database.store_report(&report)?;
         database.upsert_observation(&crate::db::Observation {
             path: destination.to_string_lossy().into_owned(),
@@ -803,7 +779,7 @@ mod tests {
                 .policy
                 .reasons
                 .iter()
-                .any(|reason| { reason.contains("restored the file to Downloads as sample.exe") })
+                .all(|reason| !reason.starts_with("The user restored"))
         );
     }
 }
