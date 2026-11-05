@@ -877,13 +877,14 @@ mod tests {
     }
 
     #[test]
-    fn software_identities_sort_by_worst_verification_state() {
+    fn software_identities_sort_by_risk_then_name() {
         let mut report = AnalysisReportV1::new(FileEvidence {
             display_path: r"C:\Users\example\Downloads\bundle.zip".into(),
             ..FileEvidence::default()
         });
         for (name, fingerprint, digest_valid) in [
             ("Valid Product", Some("1".repeat(64)), Some(true)),
+            ("Another Valid Product", Some("4".repeat(64)), Some(true)),
             ("Unsigned Product", None, None),
             ("Unverified Product", Some("2".repeat(64)), None),
             ("Invalid Product", Some("3".repeat(64)), Some(false)),
@@ -919,9 +920,17 @@ mod tests {
                 SignatureState::Unsigned,
                 SignatureState::Unverified,
                 SignatureState::Valid,
+                SignatureState::Valid,
             ]
         );
-        assert!(!groups.last().expect("valid group").starts_expanded());
+        assert_eq!(
+            groups[3..]
+                .iter()
+                .map(|group| group.product_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Another Valid Product", "Valid Product"]
+        );
+        assert!(groups[3..].iter().all(|group| !group.starts_expanded()));
         assert!(
             groups[..3]
                 .iter()
