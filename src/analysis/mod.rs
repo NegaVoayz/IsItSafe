@@ -34,7 +34,7 @@ include!("documents.rs");
 include!("scripts.rs");
 include!("certificates.rs");
 include!("pe_products.rs");
-include!("helpers.rs");
+include!("common/helpers.rs");
 
 #[cfg(test)]
 mod tests {
