@@ -263,8 +263,22 @@ pub fn compact_reason(reason: &str) -> String {
     if lower.contains("executable has no authenticode signature") {
         return "Unsigned executable".into();
     }
-    if lower.contains("named as a dll") && lower.contains("windows executable") {
-        return "DLL is actually an executable".into();
+    if lower.contains("pe executable disguised with the .") {
+        let extension = reason
+            .split("with the .")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .unwrap_or("other");
+        return format!("Executable hidden as .{extension}");
+    }
+    if lower.contains("uses a .dll extension") && lower.contains("marks it as an exe") {
+        return "EXE hidden as .dll".into();
+    }
+    if lower.contains("uses a .exe extension") && lower.contains("marks it as a dll") {
+        return "DLL hidden as .exe".into();
+    }
+    if lower.contains("pe executable with no file extension") {
+        return "Executable without extension".into();
     }
     if lower.contains("decompression bomb") {
         return "Possible zip bomb".into();
@@ -428,8 +442,14 @@ mod tests {
             "Possible zip bomb"
         );
         assert_eq!(
-            compact_reason("vcomp140.dll is named as a DLL but is a Windows executable"),
-            "DLL is actually an executable"
+            compact_reason(
+                "vcomp140.dll uses a .dll extension but its PE header marks it as an EXE"
+            ),
+            "EXE hidden as .dll"
+        );
+        assert_eq!(
+            compact_reason("patch.dat is a PE executable disguised with the .dat extension"),
+            "Executable hidden as .dat"
         );
         assert_eq!(
             compact_reason("file exceeds snapshot_max_bytes (536870912)"),

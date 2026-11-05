@@ -982,17 +982,25 @@ fn pe_extension_mismatch(path: &Path, data: &[u8]) -> Option<Evidence> {
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
-        .map(str::to_ascii_lowercase)?;
+        .map(str::to_ascii_lowercase)
+        .filter(|value| !value.is_empty());
     let pe = goblin::pe::PE::parse(data).ok()?;
-    let severity = pe_type_mismatch_severity(&extension, pe.is_lib)?;
+    let severity = pe_type_mismatch_severity(extension.as_deref(), pe.is_lib)?;
     let display_name = path
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string_lossy().into_owned());
-    let summary = if extension == "dll" {
-        format!("{display_name} is named as a DLL but is a Windows executable")
-    } else {
-        format!("{display_name} is named as an executable but is a DLL")
+    let summary = match extension.as_deref() {
+        Some("dll") => {
+            format!("{display_name} uses a .dll extension but its PE header marks it as an EXE")
+        }
+        Some("exe") => {
+            format!("{display_name} uses a .exe extension but its PE header marks it as a DLL")
+        }
+        Some(extension) => {
+            format!("{display_name} is a PE executable disguised with the .{extension} extension")
+        }
+        None => format!("{display_name} is a PE executable with no file extension"),
     };
     Some(evidence(
         format!("pe:type-mismatch:{display_name}"),
@@ -1004,10 +1012,16 @@ fn pe_extension_mismatch(path: &Path, data: &[u8]) -> Option<Evidence> {
     ))
 }
 
-fn pe_type_mismatch_severity(extension: &str, is_library: bool) -> Option<Severity> {
+fn pe_type_mismatch_severity(extension: Option<&str>, is_library: bool) -> Option<Severity> {
+    const EXPECTED_PE_EXTENSIONS: &[&str] =
+        &["exe", "dll", "sys", "ocx", "cpl", "scr", "efi", "acm", "ax"];
     match (extension, is_library) {
-        ("dll", false) => Some(Severity::High),
-        ("exe", true) => Some(Severity::Medium),
+        (None, _) => Some(Severity::High),
+        (Some(extension), _) if !EXPECTED_PE_EXTENSIONS.contains(&extension) => {
+            Some(Severity::High)
+        }
+        (Some("dll"), false) => Some(Severity::High),
+        (Some("exe"), true) => Some(Severity::Medium),
         _ => None,
     }
 }
@@ -2234,16 +2248,28 @@ mod tests {
     #[test]
     fn pe_extension_and_header_type_mismatch_is_high_risk() {
         assert_eq!(
-            pe_type_mismatch_severity("dll", false),
+            pe_type_mismatch_severity(Some("dll"), false),
             Some(Severity::High)
         );
         assert_eq!(
-            pe_type_mismatch_severity("exe", true),
+            pe_type_mismatch_severity(Some("exe"), true),
             Some(Severity::Medium)
         );
-        assert_eq!(pe_type_mismatch_severity("dll", true), None);
-        assert_eq!(pe_type_mismatch_severity("exe", false), None);
-        assert_eq!(pe_type_mismatch_severity("bin", false), None);
+        assert_eq!(
+            pe_type_mismatch_severity(Some("dat"), false),
+            Some(Severity::High)
+        );
+        assert_eq!(
+            pe_type_mismatch_severity(Some("jpg"), true),
+            Some(Severity::High)
+        );
+        assert_eq!(
+            pe_type_mismatch_severity(Some("resources"), false),
+            Some(Severity::High)
+        );
+        assert_eq!(pe_type_mismatch_severity(None, false), Some(Severity::High));
+        assert_eq!(pe_type_mismatch_severity(Some("dll"), true), None);
+        assert_eq!(pe_type_mismatch_severity(Some("exe"), false), None);
     }
 
     #[test]
