@@ -8,6 +8,7 @@ pub mod desktop;
 pub mod detect;
 pub mod interaction;
 pub mod logging;
+pub mod notification_activator;
 pub mod origin;
 pub mod policy;
 mod process;

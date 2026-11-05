@@ -17,6 +17,8 @@ use crate::report::{
 pub const APP_USER_MODEL_ID: &str = "IsItSafe.Desktop";
 pub const ACTION_SCHEME: &str = "isitsafe";
 const LEGACY_ACTION_SCHEME: &str = "isitsafe-action";
+#[cfg(windows)]
+const LEGACY_BROKEN_ACTIVATOR_CLSID: &str = "980b8b22-b56a-4bf3-a73e-44d157f9a3b7";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionSource {
@@ -307,10 +309,9 @@ pub fn restore_quarantine_from_desktop(
         append_report(paths, &report)?;
     }
 
-    let message = format!(
+    Ok(format!(
         "Restored {destination_name} to Downloads. The download execution barrier remains active."
-    );
-    Ok(message)
+    ))
 }
 
 pub fn parse_action_uri(uri: &str) -> Result<(UserDecision, Uuid)> {
@@ -395,7 +396,9 @@ mod windows_impl {
         NotificationSetting, ToastNotification, ToastNotificationManager,
     };
     use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_OK};
-    use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+    use windows::Win32::Storage::EnhancedStorage::{
+        PKEY_AppUserModel_ID, PKEY_AppUserModel_ToastActivatorCLSID,
+    };
     use windows::Win32::System::Com::StructuredStorage::{
         PROPVARIANT, PROPVARIANT_0_0, PROPVARIANT_0_0_0, PropVariantClear,
     };
@@ -411,8 +414,9 @@ mod windows_impl {
     use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
 
     use super::{
-        ACTION_SCHEME, APP_USER_MODEL_ID, AnalysisReportV1, LEGACY_ACTION_SCHEME, ReputationState,
-        Severity, UserDecision, Verdict, action_uri, clean, detail_action_uri, display_name,
+        ACTION_SCHEME, APP_USER_MODEL_ID, AnalysisReportV1, LEGACY_ACTION_SCHEME,
+        LEGACY_BROKEN_ACTIVATOR_CLSID, ReputationState, Severity, UserDecision, Verdict,
+        action_uri, clean, detail_action_uri, display_name,
     };
 
     pub(super) fn register() -> Result<()> {
@@ -438,6 +442,9 @@ mod windows_impl {
         register_action_scheme(ACTION_SCHEME, &executable)?;
         // Existing toasts may still point at the original scheme name.
         register_action_scheme(LEGACY_ACTION_SCHEME, &executable)?;
+        let _ = CURRENT_USER.remove_tree(format!(
+            r"SOFTWARE\Classes\CLSID\{{{LEGACY_BROKEN_ACTIVATOR_CLSID}}}"
+        ));
         create_start_menu_shortcut(&executable)?;
         Ok(())
     }
@@ -486,9 +493,11 @@ mod windows_impl {
 
             let store: IPropertyStore = link.cast()?;
             let mut app_id = prop_variant_string(APP_USER_MODEL_ID)?;
+            let no_activator = PROPVARIANT::default();
             let property_result: Result<()> = (|| {
                 unsafe {
                     store.SetValue(&PKEY_AppUserModel_ID, &app_id)?;
+                    store.SetValue(&PKEY_AppUserModel_ToastActivatorCLSID, &no_activator)?;
                     store.Commit()?;
                 }
                 Ok(())
@@ -584,9 +593,9 @@ mod windows_impl {
 <text id="4">{}</text>
 </binding></visual>
 <actions>
-<action content="Detail" arguments="{}" activationType="protocol" />
-<action content="Quarantine" arguments="{}" activationType="protocol" />
-<action content="Remove" arguments="{}" activationType="protocol" />
+<action content="Detail" arguments="{}" activationType="foreground" />
+<action content="Quarantine" arguments="{}" activationType="foreground" />
+<action content="Remove" arguments="{}" activationType="foreground" />
 </actions>
 </toast>"#,
             xml_text(&title),
@@ -617,6 +626,7 @@ mod windows_impl {
         let notification = ToastNotification::CreateToastNotification(&document)?;
         if let Some(tag) = tag {
             notification.SetTag(&HSTRING::from(tag))?;
+            crate::notification_activator::attach(&notification)?;
         }
         let notifier =
             ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_USER_MODEL_ID))?;
