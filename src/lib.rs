@@ -7,19 +7,20 @@ pub mod db;
 pub mod desktop;
 pub mod detect;
 pub mod interaction;
-pub mod logging;
-pub mod notification_activator;
-pub mod origin;
 pub mod policy;
-mod process;
 pub mod report;
 pub mod reputation;
-pub mod revocation;
-pub mod rules;
 pub mod sandbox;
-pub mod secrets;
-pub mod security;
 pub mod watcher;
+
+mod integration;
+mod network;
+mod platform;
+
+pub use integration::origin;
+pub use network::{revocation, rules};
+pub use platform::{logging, notification_activator, secrets, security};
+pub(crate) use platform::process;
 
 pub use analysis::analyze_bytes;
 pub use config::Config;
