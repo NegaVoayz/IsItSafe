@@ -1314,6 +1314,11 @@ fn render_product_identity(ui: &mut egui::Ui, product: &ProductIdentityEvidence)
 
 fn render_signature_group(ui: &mut egui::Ui, group: &super::data::SignatureGroup, index: usize) {
     let color = signature_color(group.state);
+    let status = if group.signer == group.state.label() {
+        String::new()
+    } else {
+        format!("  ·  {}", group.state.label())
+    };
     let certificate = group
         .certificate_sha256
         .as_deref()
@@ -1321,9 +1326,9 @@ fn render_signature_group(ui: &mut egui::Ui, group: &super::data::SignatureGroup
         .unwrap_or_default();
     egui::CollapsingHeader::new(
         RichText::new(format!(
-            "{}  ·  {}  ·  {} file{}{}",
+            "{}{}  ·  {} file{}{}",
             group.signer,
-            group.state.label(),
+            status,
             group.products.len(),
             if group.products.len() == 1 { "" } else { "s" },
             certificate
