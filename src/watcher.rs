@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher as NotifyWatcher};
@@ -79,7 +79,7 @@ impl Watcher {
                     };
                     let path_string = path.to_string_lossy().into_owned();
                     let _ = watcher.database.mark_path_running(&path_string);
-                    if let Err(error) = watcher.process_path_with_prompt(&path, interactive) {
+                    if let Err(error) = watcher.process_path_optional(&path, interactive) {
                         let _ = watcher
                             .database
                             .mark_path_finished(&path_string, Some(&error.to_string()));
@@ -258,12 +258,27 @@ impl Watcher {
         path: &Path,
         interactive: bool,
     ) -> Result<AnalysisReportV1> {
+        self.process_path_optional(path, interactive)?
+            .context("file was removed before analysis")
+    }
+
+    fn process_path_optional(
+        &self,
+        path: &Path,
+        interactive: bool,
+    ) -> Result<Option<AnalysisReportV1>> {
+        if !path.exists() {
+            return Ok(None);
+        }
         let captured = match capture(path, &self.config) {
             Ok(value) => value,
+            Err(CaptureError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
             Err(error) => {
                 let report = self.capture_error_report(path, error, &self.config)?;
                 self.publish(&report)?;
-                return Ok(report);
+                return Ok(Some(report));
             }
         };
         let mut report = self.analyze_captured(captured)?;
@@ -272,7 +287,7 @@ impl Watcher {
         if !self.notify_or_apply_fallback(&mut report, interactive)? {
             self.publish(&report)?;
         }
-        Ok(report)
+        Ok(Some(report))
     }
 
     fn notify_or_apply_fallback(
@@ -1096,6 +1111,23 @@ mod tests {
         assert!(!debounce.contains_key(&temp));
         assert!(debounce.contains_key(&final_path));
         assert_eq!(debounce.len(), 1);
+    }
+
+    #[test]
+    fn disappeared_path_does_not_publish_an_incomplete_report() {
+        let (directory, watcher) = test_watcher();
+        let missing = directory.path().join("downloads").join("restored.zip");
+
+        let report = watcher.process_path_optional(&missing, false).unwrap();
+
+        assert!(report.is_none());
+        assert!(
+            watcher
+                .database
+                .latest_report_summaries()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
