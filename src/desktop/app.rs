@@ -996,6 +996,12 @@ fn configure_style(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = Vec2::new(8.0, 7.0);
         style.spacing.button_padding = Vec2::new(10.0, 6.0);
+        let mut scroll = egui::style::ScrollStyle::solid();
+        scroll.bar_width = 7.0;
+        scroll.handle_min_length = 24.0;
+        scroll.bar_inner_margin = 8.0;
+        scroll.bar_outer_margin = 4.0;
+        style.spacing.scroll = scroll;
         style
             .text_styles
             .insert(TextStyle::Heading, FontId::proportional(24.0));
