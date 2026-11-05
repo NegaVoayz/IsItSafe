@@ -35,6 +35,8 @@ const ACCENT: Color32 = Color32::from_rgb(141, 226, 181);
 const WARNING: Color32 = Color32::from_rgb(244, 194, 104);
 const DANGER: Color32 = Color32::from_rgb(245, 123, 120);
 const BLUE: Color32 = Color32::from_rgb(132, 183, 242);
+const SCROLLBAR_REVEAL_GUTTER: f32 = 36.0;
+const SCROLLBAR_REVEAL_AFTER_SCROLL: Duration = Duration::from_millis(650);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -69,6 +71,7 @@ pub(super) struct DesktopApp {
     last_refresh: Instant,
     last_monitor_check: Instant,
     last_detail_request_check: Instant,
+    last_content_scroll: Option<Instant>,
 }
 
 impl DesktopApp {
@@ -99,6 +102,7 @@ impl DesktopApp {
             last_refresh: Instant::now(),
             last_monitor_check: Instant::now(),
             last_detail_request_check: Instant::now(),
+            last_content_scroll: None,
         };
         match requested_details {
             Ok(Some(report_id)) => app.open_details(report_id),
@@ -406,6 +410,7 @@ impl DesktopApp {
         let entries = self.snapshot.questionable.clone();
         let mut quarantine = None;
         let mut details = None;
+        self.prepare_scroll_reveal(ui);
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
@@ -549,6 +554,7 @@ impl DesktopApp {
 
         let entries = self.snapshot.quarantine.clone();
         let mut restore = None;
+        self.prepare_scroll_reveal(ui);
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
@@ -646,6 +652,7 @@ impl DesktopApp {
         }
         ui.add_space(12.0);
         self.render_status(ui);
+        self.prepare_scroll_reveal(ui);
 
         let Some(report) = self.selected_report.as_ref() else {
             if self.busy {
@@ -937,6 +944,26 @@ impl DesktopApp {
             }
         } else if open && !cancel {
             self.restore_prompt = Some(prompt);
+        }
+    }
+
+    fn prepare_scroll_reveal(&mut self, ui: &mut egui::Ui) {
+        let viewport = ui.available_rect_before_wrap();
+        let pointer = ui.input(|input| input.pointer.latest_pos());
+        let scrolling_here = pointer.is_some_and(|position| viewport.contains(position))
+            && ui.input(|input| input.smooth_scroll_delta.y.abs() > f32::EPSILON);
+        let now = Instant::now();
+        if scrolling_here {
+            self.last_content_scroll = Some(now);
+        }
+
+        let reveal = scrollbar_should_reveal(viewport, pointer, self.last_content_scroll, now);
+
+        let scroll = &mut ui.style_mut().spacing.scroll;
+        scroll.active_handle_opacity = if reveal { 0.55 } else { 0.0 };
+        scroll.active_background_opacity = if reveal { 0.22 } else { 0.0 };
+        if reveal {
+            ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
     }
 }
@@ -1639,4 +1666,66 @@ fn file_name(path: &str) -> String {
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_string())
+}
+
+fn scrollbar_should_reveal(
+    viewport: egui::Rect,
+    pointer: Option<egui::Pos2>,
+    last_scroll: Option<Instant>,
+    now: Instant,
+) -> bool {
+    pointer.is_some_and(|position| {
+        viewport.y_range().contains(position.y)
+            && position.x >= viewport.right() - SCROLLBAR_REVEAL_GUTTER
+    }) || last_scroll.is_some_and(|time| {
+        now.checked_duration_since(time)
+            .is_some_and(|elapsed| elapsed < SCROLLBAR_REVEAL_AFTER_SCROLL)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn viewport() -> egui::Rect {
+        egui::Rect::from_min_max(egui::pos2(200.0, 100.0), egui::pos2(980.0, 700.0))
+    }
+
+    #[test]
+    fn scrollbar_stays_hidden_away_from_the_right_edge() {
+        let now = Instant::now();
+        assert!(!scrollbar_should_reveal(
+            viewport(),
+            Some(egui::pos2(500.0, 300.0)),
+            None,
+            now
+        ));
+    }
+
+    #[test]
+    fn scrollbar_reveals_near_the_right_edge() {
+        assert!(scrollbar_should_reveal(
+            viewport(),
+            Some(egui::pos2(960.0, 300.0)),
+            None,
+            Instant::now()
+        ));
+    }
+
+    #[test]
+    fn scrollbar_reveals_briefly_after_scrolling() {
+        let now = Instant::now();
+        assert!(scrollbar_should_reveal(
+            viewport(),
+            Some(egui::pos2(500.0, 300.0)),
+            Some(now - Duration::from_millis(200)),
+            now
+        ));
+        assert!(!scrollbar_should_reveal(
+            viewport(),
+            Some(egui::pos2(500.0, 300.0)),
+            Some(now - SCROLLBAR_REVEAL_AFTER_SCROLL),
+            now
+        ));
+    }
 }
