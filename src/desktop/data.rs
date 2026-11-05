@@ -263,6 +263,9 @@ pub fn compact_reason(reason: &str) -> String {
     if lower.contains("executable has no authenticode signature") {
         return "Unsigned executable".into();
     }
+    if lower.contains("named as a dll") && lower.contains("windows executable") {
+        return "DLL is actually an executable".into();
+    }
     if lower.contains("decompression bomb") {
         return "Possible zip bomb".into();
     }
@@ -423,6 +426,10 @@ mod tests {
                 "Potential decompression bomb: payload.dat, ratio 1026:1, 6731776 bytes declared"
             ),
             "Possible zip bomb"
+        );
+        assert_eq!(
+            compact_reason("vcomp140.dll is named as a DLL but is a Windows executable"),
+            "DLL is actually an executable"
         );
         assert_eq!(
             compact_reason("file exceeds snapshot_max_bytes (536870912)"),

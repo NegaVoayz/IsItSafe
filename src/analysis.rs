@@ -745,6 +745,9 @@ fn analyze_archive_member(
     child_evidence.extend(feature_analysis.facts);
     let hash = hex::encode(Sha256::digest(member));
     let signed = sign_status(member);
+    if let Some(mismatch) = pe_extension_mismatch(&member_path, member) {
+        child_evidence.push(mismatch);
+    }
     record_pe_product(member, child_path, analysis);
     let severity = if child_evidence
         .iter()
@@ -798,6 +801,9 @@ fn contains_container(data: &[u8]) -> bool {
 }
 
 fn analyze_pe(path: &Path, data: &[u8], _limits: &AnalysisLimits, analysis: &mut ChildAnalysis) {
+    if let Some(mismatch) = pe_extension_mismatch(path, data) {
+        analysis.facts.push(mismatch);
+    }
     if let Some(product) = pe_product_identity(data, None) {
         note_product_identity_mismatch(path, &product, analysis);
         analysis.products.push(product);
@@ -969,6 +975,40 @@ fn analyze_pe(path: &Path, data: &[u8], _limits: &AnalysisLimits, analysis: &mut
                 ));
             }
         }
+    }
+}
+
+fn pe_extension_mismatch(path: &Path, data: &[u8]) -> Option<Evidence> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)?;
+    let pe = goblin::pe::PE::parse(data).ok()?;
+    let severity = pe_type_mismatch_severity(&extension, pe.is_lib)?;
+    let display_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    let summary = if extension == "dll" {
+        format!("{display_name} is named as a DLL but is a Windows executable")
+    } else {
+        format!("{display_name} is named as an executable but is a DLL")
+    };
+    Some(evidence(
+        format!("pe:type-mismatch:{display_name}"),
+        "pe_extension_mismatch",
+        severity,
+        summary,
+        "child PE header",
+        Confidence::Structural,
+    ))
+}
+
+fn pe_type_mismatch_severity(extension: &str, is_library: bool) -> Option<Severity> {
+    match (extension, is_library) {
+        ("dll", false) => Some(Severity::High),
+        ("exe", true) => Some(Severity::Medium),
+        _ => None,
     }
 }
 
@@ -2189,6 +2229,21 @@ mod tests {
                 .as_deref()
                 .is_some_and(|detail| { detail.contains("Microsoft SQL Server 2014") })
         );
+    }
+
+    #[test]
+    fn pe_extension_and_header_type_mismatch_is_high_risk() {
+        assert_eq!(
+            pe_type_mismatch_severity("dll", false),
+            Some(Severity::High)
+        );
+        assert_eq!(
+            pe_type_mismatch_severity("exe", true),
+            Some(Severity::Medium)
+        );
+        assert_eq!(pe_type_mismatch_severity("dll", true), None);
+        assert_eq!(pe_type_mismatch_severity("exe", false), None);
+        assert_eq!(pe_type_mismatch_severity("bin", false), None);
     }
 
     #[test]
