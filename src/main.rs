@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use isitsafe::Watcher;
 use isitsafe::config::{AppPaths, Config};
 use isitsafe::db::Database;
+use isitsafe::interaction::{NotificationAction, parse_notification_action};
 use isitsafe::policy::{prune_quarantine, restore_quarantine};
 use isitsafe::sandbox::{is_internal_child_invocation, run_child_main};
 use isitsafe::secrets::store_virus_total_api_key;
@@ -280,9 +281,20 @@ fn run() -> Result<()> {
         }
         Commands::HandleAction { uri } => {
             let database = Database::open_with_recovery(&paths.database)?;
-            let result =
-                isitsafe::interaction::handle_action_uri(&uri, &config, &database, &paths)?;
-            println!("{result}");
+            match parse_notification_action(&uri)? {
+                NotificationAction::Decision(_) => {
+                    let result =
+                        isitsafe::interaction::handle_action_uri(&uri, &config, &database, &paths)?;
+                    println!("{result}");
+                }
+                NotificationAction::Detail(report_id) => {
+                    if database.report_by_id(&report_id.to_string())?.is_none() {
+                        bail!("the stored report for {report_id} is unavailable");
+                    }
+                    isitsafe::desktop::open_details(&paths, report_id)?;
+                    return isitsafe::desktop::run(config, paths, true);
+                }
+            }
             Ok(())
         }
         Commands::InternalChild => run_child_main(),
