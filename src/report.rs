@@ -562,8 +562,11 @@ pub struct ProductIdentityEvidence {
     pub original_filename: Option<String>,
     pub file_description: Option<String>,
     pub legal_copyright: Option<String>,
+    #[serde(default)]
     pub signer_identity: Option<String>,
+    #[serde(default)]
     pub signer_sha256: Option<String>,
+    #[serde(default)]
     pub signature_digest_valid: Option<bool>,
     pub source: String,
     pub nesting_path: Option<String>,
@@ -710,5 +713,27 @@ mod tests {
         );
         let json = serde_json::to_value(summary).unwrap();
         assert!(json.get("components").is_none());
+    }
+
+    #[test]
+    fn legacy_product_identity_without_signer_fields_deserializes() {
+        let product: ProductIdentityEvidence = serde_json::from_value(serde_json::json!({
+            "product_name": "Legacy Product",
+            "manufacturer": "Example Corp",
+            "product_version": "1.0",
+            "product_code": null,
+            "upgrade_code": null,
+            "original_filename": "legacy.exe",
+            "file_description": "Legacy executable",
+            "legal_copyright": null,
+            "source": "PE version information",
+            "nesting_path": "legacy.exe"
+        }))
+        .unwrap();
+
+        assert_eq!(product.product_name.as_deref(), Some("Legacy Product"));
+        assert!(product.signer_identity.is_none());
+        assert!(product.signer_sha256.is_none());
+        assert!(product.signature_digest_valid.is_none());
     }
 }
