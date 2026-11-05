@@ -51,7 +51,6 @@ mod windows {
     use std::mem::{size_of, zeroed};
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
-    use std::process::Command;
     use std::ptr::{addr_of, null_mut};
 
     use anyhow::{Context, Result, bail};
@@ -68,6 +67,7 @@ mod windows {
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     use super::ExecutionBarrierStatus;
+    use crate::process::hidden_command;
 
     pub(super) fn ensure(download_dir: &Path) -> Result<ExecutionBarrierStatus> {
         let user_sid = current_user_sid()?;
@@ -82,7 +82,7 @@ mod windows {
         }
         let deny_ace = format!("*{user_sid}:(OI)(IO)(X)");
 
-        let output = Command::new("icacls.exe")
+        let output = hidden_command("icacls.exe")
             .arg(download_dir)
             .arg("/deny")
             .arg(&deny_ace)

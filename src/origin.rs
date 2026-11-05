@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -12,6 +11,7 @@ use crate::config::{AppPaths, Config};
 use crate::db::{
     Database, DownloadOrigin, normalize_path, read_native_message, write_native_message,
 };
+use crate::process::hidden_command;
 use crate::report::{FieldState, OriginEvidence, OriginState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,7 +159,7 @@ pub fn install_native_host(config: &Config, paths: &AppPaths) -> Result<Vec<Path
         ),
     ] {
         if !config.origin.chrome_extension_ids.is_empty() {
-            let status = Command::new("reg.exe")
+            let output = hidden_command("reg.exe")
                 .args([
                     "add",
                     registry,
@@ -170,8 +170,8 @@ pub fn install_native_host(config: &Config, paths: &AppPaths) -> Result<Vec<Path
                     &chrome_manifest_path.to_string_lossy(),
                     "/f",
                 ])
-                .status()?;
-            if !status.success() {
+                .output()?;
+            if !output.status.success() {
                 bail!("failed to register the {browser} Native Messaging host");
             }
         }

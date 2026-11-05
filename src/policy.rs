@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
@@ -8,6 +7,7 @@ use chrono::Utc;
 use crate::capture::{CaptureDepth, capture, remove_if_hash_matches};
 use crate::config::{Config, GIB};
 use crate::db::{Database, normalize_path};
+use crate::process::hidden_command;
 use crate::report::{
     AnalysisReportV1, BoundaryKind, PolicyAction, PublisherReputation, ReputationState, Severity,
     Verdict,
@@ -476,14 +476,14 @@ fn origin_matches(url: &str, expected: &str, path_prefix: Option<&str>) -> bool 
 #[cfg(windows)]
 fn deny_execute_acl(path: &Path) -> Result<()> {
     let user = std::env::var("USERNAME").context("USERNAME is unavailable")?;
-    let status = Command::new("icacls.exe")
+    let output = hidden_command("icacls.exe")
         .arg(path)
         .arg("/inheritance:r")
         .arg("/grant:r")
         .arg(format!("{user}:(R,W,D)"))
-        .status()
+        .output()
         .context("failed to run icacls for quarantine ACL")?;
-    if !status.success() {
+    if !output.status.success() {
         bail!("icacls failed to set quarantine ACL");
     }
     Ok(())
@@ -497,13 +497,13 @@ fn deny_execute_acl(_path: &Path) -> Result<()> {
 #[cfg(windows)]
 fn allow_execute_acl(path: &Path) -> Result<()> {
     let user = std::env::var("USERNAME").context("USERNAME is unavailable")?;
-    let status = Command::new("icacls.exe")
+    let output = hidden_command("icacls.exe")
         .arg(path)
         .arg("/grant")
         .arg(format!("{user}:(RX)"))
-        .status()
+        .output()
         .context("failed to run icacls while restoring quarantine")?;
-    if !status.success() {
+    if !output.status.success() {
         bail!("quarantine file was restored but its execute ACL could not be restored");
     }
     Ok(())

@@ -10,6 +10,7 @@ pub mod interaction;
 pub mod logging;
 pub mod origin;
 pub mod policy;
+mod process;
 pub mod report;
 pub mod reputation;
 pub mod revocation;
