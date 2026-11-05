@@ -281,10 +281,12 @@ pub fn restore_quarantine_from_desktop(
         report.file.display_path = destination.to_string_lossy().into_owned();
         report.file.full_path_redacted = Some(destination_name.to_string());
         report.source_path = Some(destination.clone());
-        report.policy.user_decision = Some(UserDecision::Keep);
+        // Restoring is not a Keep decision. The file must return to Review so
+        // the user can inspect it again while the execution barrier stays on.
+        report.policy.user_decision = None;
         report.policy.quarantine_requested = false;
         report.policy.quarantine_path = None;
-        report.policy.action = PolicyAction::Notify;
+        report.policy.action = PolicyAction::RequireReview;
         report.policy.reasons.push(format!(
             "The user restored the file to Downloads as {destination_name}; execution remains blocked"
         ));
@@ -787,7 +789,7 @@ mod tests {
         assert!(source.exists());
         assert!(database.list_quarantine().unwrap().is_empty());
         let restored = database.report_by_sha256(&hash).unwrap().unwrap();
-        assert_eq!(restored.policy.user_decision, Some(UserDecision::Keep));
+        assert_eq!(restored.policy.user_decision, None);
         assert!(
             restored
                 .policy
