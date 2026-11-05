@@ -3,7 +3,7 @@
 use anyhow::{Result, anyhow};
 use isitsafe::config::{AppPaths, Config};
 use isitsafe::db::Database;
-use isitsafe::interaction::handle_action_uri;
+use isitsafe::interaction::{NotificationAction, handle_action_uri, parse_notification_action};
 use isitsafe::sandbox::{is_internal_child_invocation, run_child_main};
 use std::io::Write;
 
@@ -38,7 +38,18 @@ fn run() -> Result<()> {
         config.validate()?;
         isitsafe::logging::initialize(&paths, &config)?;
         let database = Database::open_with_recovery(&paths.database)?;
-        handle_action_uri(uri, &config, &database, &paths)?;
+        match parse_notification_action(uri)? {
+            NotificationAction::Decision(_) => {
+                handle_action_uri(uri, &config, &database, &paths)?;
+            }
+            NotificationAction::Detail(report_id) => {
+                if database.report_by_id(&report_id.to_string())?.is_none() {
+                    return Err(anyhow!("the stored report for {report_id} is unavailable"));
+                }
+                isitsafe::desktop::open_details(&paths, report_id)?;
+                return isitsafe::desktop::run(config, paths, true);
+            }
+        }
         return Ok(());
     }
     let background = arguments.iter().any(|argument| argument == "--background");

@@ -55,6 +55,7 @@ struct StatusMessage {
 
 pub(super) struct DesktopApp {
     config: Arc<Config>,
+    paths: Arc<AppPaths>,
     worker: Worker,
     snapshot: DesktopSnapshot,
     page: Page,
@@ -67,6 +68,7 @@ pub(super) struct DesktopApp {
     monitor_running: bool,
     last_refresh: Instant,
     last_monitor_check: Instant,
+    last_detail_request_check: Instant,
 }
 
 impl DesktopApp {
@@ -77,11 +79,13 @@ impl DesktopApp {
         paths: Arc<AppPaths>,
     ) -> Self {
         configure_style(&creation.egui_ctx);
-        let worker = Worker::start(Arc::clone(&config), database, paths);
+        let requested_details = super::take_requested_details(&paths);
+        let worker = Worker::start(Arc::clone(&config), database, Arc::clone(&paths));
         let _ = worker.send(WorkerRequest::Refresh);
         let monitor_running = super::monitor_is_running();
-        Self {
+        let mut app = Self {
             config,
+            paths,
             worker,
             snapshot: DesktopSnapshot::default(),
             page: Page::Review,
@@ -94,7 +98,19 @@ impl DesktopApp {
             monitor_running,
             last_refresh: Instant::now(),
             last_monitor_check: Instant::now(),
+            last_detail_request_check: Instant::now(),
+        };
+        match requested_details {
+            Ok(Some(report_id)) => app.open_details(report_id),
+            Ok(None) => {}
+            Err(error) => {
+                app.status = Some(StatusMessage {
+                    text: format!("Could not open the requested report: {error:#}"),
+                    error: true,
+                });
+            }
         }
+        app
     }
 
     fn request_refresh(&mut self) {
@@ -936,6 +952,23 @@ impl eframe::App for DesktopApp {
         if self.last_monitor_check.elapsed() >= Duration::from_secs(2) {
             self.monitor_running = super::monitor_is_running();
             self.last_monitor_check = Instant::now();
+        }
+        if !self.busy && self.last_detail_request_check.elapsed() >= Duration::from_millis(250) {
+            self.last_detail_request_check = Instant::now();
+            match super::take_requested_details(&self.paths) {
+                Ok(Some(report_id))
+                    if self.page != Page::Details || self.selected_report_id != Some(report_id) =>
+                {
+                    self.open_details(report_id);
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    self.status = Some(StatusMessage {
+                        text: format!("Could not open the requested report: {error:#}"),
+                        error: true,
+                    });
+                }
+            }
         }
 
         self.render_title_bar(ui);

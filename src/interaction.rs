@@ -15,7 +15,8 @@ use crate::report::{
 };
 
 pub const APP_USER_MODEL_ID: &str = "IsItSafe.Desktop";
-pub const ACTION_SCHEME: &str = "isitsafe-action";
+pub const ACTION_SCHEME: &str = "isitsafe";
+const LEGACY_ACTION_SCHEME: &str = "isitsafe-action";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionSource {
@@ -77,6 +78,36 @@ pub fn action_uri(action: UserDecision, report_id: Uuid) -> String {
         UserDecision::Remove => "remove",
     };
     format!("{ACTION_SCHEME}://{action}/{report_id}")
+}
+
+pub fn detail_action_uri(report_id: Uuid) -> String {
+    format!("{ACTION_SCHEME}://detail/{report_id}")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationAction {
+    Decision(UserDecision),
+    Detail(Uuid),
+}
+
+pub fn parse_notification_action(uri: &str) -> Result<NotificationAction> {
+    let parsed = Url::parse(uri).context("invalid IsItSafe action URI")?;
+    if parsed.scheme() != ACTION_SCHEME && parsed.scheme() != LEGACY_ACTION_SCHEME {
+        bail!("unexpected action URI scheme");
+    }
+    let report_id = parsed
+        .path()
+        .trim_matches('/')
+        .parse::<Uuid>()
+        .context("invalid report ID in IsItSafe action URI")?;
+    let action = match parsed.host_str() {
+        Some("detail") => NotificationAction::Detail(report_id),
+        Some("keep") => NotificationAction::Decision(UserDecision::Keep),
+        Some("quarantine") => NotificationAction::Decision(UserDecision::Quarantine),
+        Some("remove") => NotificationAction::Decision(UserDecision::Remove),
+        _ => bail!("unknown IsItSafe notification action"),
+    };
+    Ok(action)
 }
 
 /// Handles a button click forwarded by the registered custom URI scheme.
@@ -281,22 +312,20 @@ pub fn restore_quarantine_from_desktop(
 }
 
 pub fn parse_action_uri(uri: &str) -> Result<(UserDecision, Uuid)> {
-    let parsed = Url::parse(uri).context("invalid IsItSafe action URI")?;
-    if parsed.scheme() != ACTION_SCHEME {
-        bail!("unexpected action URI scheme");
+    match parse_notification_action(uri)? {
+        NotificationAction::Decision(decision) => {
+            let parsed = Url::parse(uri)?;
+            let report_id = parsed
+                .path()
+                .trim_matches('/')
+                .parse::<Uuid>()
+                .context("invalid report ID in IsItSafe action URI")?;
+            Ok((decision, report_id))
+        }
+        NotificationAction::Detail(_) => {
+            bail!("the notification action does not represent a decision")
+        }
     }
-    let decision = match parsed.host_str() {
-        Some("keep") => UserDecision::Keep,
-        Some("quarantine") => UserDecision::Quarantine,
-        Some("remove") => UserDecision::Remove,
-        _ => bail!("unknown IsItSafe notification action"),
-    };
-    let report_id = parsed
-        .path()
-        .trim_matches('/')
-        .parse::<Uuid>()
-        .context("invalid report ID in IsItSafe action URI")?;
-    Ok((decision, report_id))
 }
 
 fn show_status_notification(title: &str, message: &str) -> Result<()> {
@@ -380,8 +409,8 @@ mod windows_impl {
     use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
 
     use super::{
-        ACTION_SCHEME, APP_USER_MODEL_ID, AnalysisReportV1, ReputationState, Severity,
-        UserDecision, Verdict, action_uri, clean, display_name,
+        ACTION_SCHEME, APP_USER_MODEL_ID, AnalysisReportV1, LEGACY_ACTION_SCHEME, ReputationState,
+        Severity, UserDecision, Verdict, action_uri, clean, detail_action_uri, display_name,
     };
 
     pub(super) fn register() -> Result<()> {
@@ -404,17 +433,24 @@ mod windows_impl {
         key.set_string("IconUri", executable.display().to_string())?;
         key.set_string("IconBackgroundColor", "0")?;
 
-        let scheme = CURRENT_USER.create(format!(r"SOFTWARE\Classes\{ACTION_SCHEME}"))?;
+        register_action_scheme(ACTION_SCHEME, &executable)?;
+        // Existing toasts may still point at the original scheme name.
+        register_action_scheme(LEGACY_ACTION_SCHEME, &executable)?;
+        create_start_menu_shortcut(&executable)?;
+        Ok(())
+    }
+
+    fn register_action_scheme(scheme_name: &str, executable: &Path) -> Result<()> {
+        let scheme = CURRENT_USER.create(format!(r"SOFTWARE\Classes\{scheme_name}"))?;
         scheme.set_string("", "URL:IsItSafe notification action")?;
         scheme.set_string("URL Protocol", "")?;
         let command = CURRENT_USER.create(format!(
-            r"SOFTWARE\Classes\{ACTION_SCHEME}\shell\open\command"
+            r"SOFTWARE\Classes\{scheme_name}\shell\open\command"
         ))?;
         command.set_string(
             "",
             format!("\"{}\" handle-action \"%1\"", executable.display()),
         )?;
-        create_start_menu_shortcut(&executable)?;
         Ok(())
     }
 
@@ -546,7 +582,7 @@ mod windows_impl {
 <text id="4">{}</text>
 </binding></visual>
 <actions>
-<action content="Keep" arguments="{}" activationType="protocol" />
+<action content="Detail" arguments="{}" activationType="protocol" />
 <action content="Quarantine" arguments="{}" activationType="protocol" />
 <action content="Remove" arguments="{}" activationType="protocol" />
 </actions>
@@ -555,7 +591,7 @@ mod windows_impl {
             xml_text(&facts.join("  •  ")),
             xml_text(&detail),
             xml_text(&reason),
-            xml_attribute(&action_uri(UserDecision::Keep, report.report_id)),
+            xml_attribute(&detail_action_uri(report.report_id)),
             xml_attribute(&action_uri(UserDecision::Quarantine, report.report_id)),
             xml_attribute(&action_uri(UserDecision::Remove, report.report_id)),
         );
@@ -645,6 +681,27 @@ mod tests {
         assert_eq!(
             parse_action_uri(&uri).unwrap(),
             (UserDecision::Quarantine, report_id)
+        );
+    }
+
+    #[test]
+    fn notification_detail_uri_round_trips() {
+        let report_id = Uuid::new_v4();
+        let uri = detail_action_uri(report_id);
+        assert_eq!(uri, format!("isitsafe://detail/{report_id}"));
+        assert_eq!(
+            parse_notification_action(&uri).unwrap(),
+            NotificationAction::Detail(report_id)
+        );
+    }
+
+    #[test]
+    fn legacy_notification_actions_remain_compatible() {
+        let report_id = Uuid::new_v4();
+        let uri = format!("isitsafe-action://keep/{report_id}");
+        assert_eq!(
+            parse_notification_action(&uri).unwrap(),
+            NotificationAction::Decision(UserDecision::Keep)
         );
     }
 
