@@ -54,7 +54,9 @@ Source: "..\extension\firefox\*"; DestDir: "{app}\extensions\firefox"; Flags: ig
 [Icons]
 Name: "{autoprograms}\IsItSafe"; Filename: "{app}\isitsafe-ui.exe"; Comment: "Open the IsItSafe download safety workspace"
 Name: "{autodesktop}\IsItSafe"; Filename: "{app}\isitsafe-ui.exe"; Comment: "Open the IsItSafe download safety workspace"; Tasks: desktopicon
-Name: "{userstartup}\IsItSafe Monitor"; Filename: "{app}\isitsafe-ui.exe"; Parameters: "--background"; Comment: "Monitor downloads for unsafe content"; Tasks: autostart
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "IsItSafe"; ValueData: """{app}\isitsafe-ui.exe"" --background"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 Filename: "{app}\isitsafe.exe"; Parameters: "init"; Flags: runhidden waituntilterminated; StatusMsg: "Initializing download protection..."

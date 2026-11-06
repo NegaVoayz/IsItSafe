@@ -48,13 +48,15 @@ API key.
 The installed package includes `isitsafe-ui.exe`, a native eframe/egui Windows
 application. It has a Review page for questionable downloads, a Quarantine page
 with hash-verified restore actions, and a stored component-inventory view that
-shows detected software identities and highlights risky embedded files. Its
-custom captionless title strip provides
+shows detected software identities and highlights risky embedded files. The
+Settings page controls the active monitor, sign-in startup, the watched download
+directory, and the quarantine location on any writable drive. Its custom
+captionless title strip provides
 drag, minimize, maximize/restore, and close controls. The UI reads the local
 SQLite state directly and does not start an HTTP server or require WebView2.
 Run `isitsafe-ui.exe --background` to start the monitor without opening a
-window. Background monitoring at sign-in is enabled by default and can be
-deselected during installation.
+window. The installer offers sign-in monitoring as an initial option; the
+Settings page can change or disable it later.
 
 When YARA support is enabled, built-in rules run in the sandbox. Signed remote rule packs can be installed with `isitsafe.exe rules update` after configuring `yara.remote_manifest_url` and `yara.public_key_base64`. The manifest payload is Ed25519-signed and every downloaded rule file is SHA-256 verified before use.
 
@@ -83,6 +85,9 @@ The default download directory is `%USERPROFILE%\Downloads`. Important settings 
 - `limits.lock_acquisition_timeout_ms`: maximum wait for an exclusive readiness handle.
 - `security.block_execution_in_download_dir`: apply and verify the inherited download-directory execute denial.
 - `interaction.enabled`: post the Windows Keep/Quarantine/Remove review notification for actionable results.
+- `runtime.monitor_enabled`: whether the desktop app keeps background monitoring active.
+- `runtime.start_at_login`: mirror of the per-user Windows sign-in registration managed by Settings.
+- `storage.quarantine_dir`: folder that receives new quarantine entries; existing entries remain at their recorded paths.
 - `events.temp_extensions`: downloader temporary extensions.
 - `events.temp_rename_grace_ms`: time before a never-renamed temporary file emits `TempOnly`.
 - `virus_total.requests_per_minute`: global persistent VirusTotal limit.
