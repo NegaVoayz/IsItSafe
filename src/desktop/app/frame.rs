@@ -80,15 +80,6 @@ impl DesktopApp {
                 ) {
                     self.page = Page::Quarantine;
                 }
-                if navigation_button(
-                    ui,
-                    self.page == Page::Settings,
-                    "Settings",
-                    None,
-                    MUTED,
-                ) {
-                    self.page = Page::Settings;
-                }
 
                 ui.add_space(26.0);
                 ui.label(RichText::new("RISK GROUPS").size(10.0).color(MUTED));
@@ -125,12 +116,16 @@ impl DesktopApp {
                 }
 
                 ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-                    ui.label(
-                        RichText::new("Static analysis does not prove runtime safety.")
-                            .size(10.0)
-                            .color(MUTED),
-                    );
-                    ui.add_space(8.0);
+                    if navigation_button(
+                        ui,
+                        self.page == Page::Settings,
+                        "Settings",
+                        None,
+                        MUTED,
+                    ) {
+                        self.page = Page::Settings;
+                    }
+                    ui.add_space(14.0);
                     ui.horizontal(|ui| {
                         let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
                         ui.painter().circle_filled(
@@ -148,6 +143,12 @@ impl DesktopApp {
                             .color(MUTED),
                         );
                     });
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Static analysis does not prove runtime safety.")
+                            .size(10.0)
+                            .color(MUTED),
+                    );
                 });
             });
     }

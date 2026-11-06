@@ -71,6 +71,7 @@ fn navigation_button(
         })
         .inner_margin(egui::Margin::symmetric(10, 9))
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (dot, _) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 3.5, color);
