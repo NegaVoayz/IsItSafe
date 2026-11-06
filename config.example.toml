@@ -8,6 +8,8 @@ quarantine_dir = 'C:\Users\me\AppData\Local\IsItSafe\quarantine'
 [runtime]
 monitor_enabled = true
 start_at_login = false
+# Adds “Is It Safe?” to the per-user Explorer file context menu.
+context_menu_enabled = false
 
 [security]
 block_execution_in_download_dir = true

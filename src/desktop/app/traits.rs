@@ -12,16 +12,26 @@ impl eframe::App for DesktopApp {
         }
         if !self.busy && self.last_detail_request_check.elapsed() >= Duration::from_millis(250) {
             self.last_detail_request_check = Instant::now();
-            match super::take_requested_details(&self.paths) {
-                Ok(Some(report_id))
-                    if self.page != Page::Details || self.selected_report_id != Some(report_id) =>
-                {
-                    self.open_details(report_id);
-                }
-                Ok(_) => {}
+            match super::requests::take_requested_scan(&self.paths) {
+                Ok(Some(path)) => self.scan_file(path),
+                Ok(None) => match super::requests::take_requested_details(&self.paths) {
+                    Ok(Some(report_id))
+                        if self.page != Page::Details
+                            || self.selected_report_id != Some(report_id) =>
+                    {
+                        self.open_details(report_id);
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        self.status = Some(StatusMessage {
+                            text: format!("Could not open the requested report: {error:#}"),
+                            error: true,
+                        });
+                    }
+                },
                 Err(error) => {
                     self.status = Some(StatusMessage {
-                        text: format!("Could not open the requested report: {error:#}"),
+                        text: format!("Could not scan the selected file: {error:#}"),
                         error: true,
                     });
                 }

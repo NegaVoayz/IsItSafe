@@ -50,7 +50,9 @@ application. It has a Review page for questionable downloads, a Quarantine page
 with hash-verified restore actions, and a stored component-inventory view that
 shows detected software identities and highlights risky embedded files. The
 Settings page controls the active monitor, sign-in startup, the watched download
-directory, and the quarantine location on any writable drive. Its custom
+directory, the quarantine location on any writable drive, and an optional
+`Is It Safe?` Explorer file context menu. The context-menu action scans only the
+selected file in memory and opens its stored report in the desktop app. Its custom
 captionless title strip provides
 drag, minimize, maximize/restore, and close controls. The UI reads the local
 SQLite state directly and does not start an HTTP server or require WebView2.
@@ -87,6 +89,7 @@ The default download directory is `%USERPROFILE%\Downloads`. Important settings 
 - `interaction.enabled`: post the Windows Keep/Quarantine/Remove review notification for actionable results.
 - `runtime.monitor_enabled`: whether the desktop app keeps background monitoring active.
 - `runtime.start_at_login`: mirror of the per-user Windows sign-in registration managed by Settings.
+- `runtime.context_menu_enabled`: mirror of the per-user `Is It Safe?` Explorer file context-menu registration.
 - `storage.quarantine_dir`: folder that receives new quarantine entries; existing entries remain at their recorded paths.
 - `events.temp_extensions`: downloader temporary extensions.
 - `events.temp_rename_grace_ms`: time before a never-renamed temporary file emits `TempOnly`.

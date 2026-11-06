@@ -6,13 +6,17 @@ impl DesktopApp {
         paths: Arc<AppPaths>,
     ) -> Self {
         configure_style(&creation.egui_ctx);
-        let requested_details = super::take_requested_details(&paths);
+        let requested_details = super::requests::take_requested_details(&paths);
         let worker = Worker::start(Arc::clone(&config), database, Arc::clone(&paths));
         let _ = worker.send(WorkerRequest::Refresh);
         let monitor_running = super::monitor::is_running();
         let settings = {
             let live = config.read();
-            SettingsDraft::from_config(&live, crate::startup::is_enabled())
+            SettingsDraft::from_config(
+                &live,
+                crate::startup::is_enabled(),
+                crate::context_menu::is_enabled(),
+            )
         };
         let mut app = Self {
             config,
@@ -79,6 +83,23 @@ impl DesktopApp {
         self.busy_message = Some("Quarantining file after SHA-256 verification…");
         self.status = None;
         if let Err(error) = self.worker.send(WorkerRequest::Quarantine(report_id)) {
+            self.busy = false;
+            self.busy_message = None;
+            self.status = Some(StatusMessage {
+                text: error,
+                error: true,
+            });
+        }
+    }
+
+    fn scan_file(&mut self, path: std::path::PathBuf) {
+        if self.busy {
+            return;
+        }
+        self.busy = true;
+        self.busy_message = Some("Analyzing the selected file…");
+        self.status = None;
+        if let Err(error) = self.worker.send(WorkerRequest::ScanFile(path)) {
             self.busy = false;
             self.busy_message = None;
             self.status = Some(StatusMessage {
@@ -156,6 +177,30 @@ impl DesktopApp {
                     self.last_refresh = Instant::now();
                     ctx.request_repaint();
                 }
+                WorkerEvent::ScanFinished { result, snapshot } => {
+                    self.busy = false;
+                    self.busy_message = None;
+                    match snapshot {
+                        Ok(snapshot) => self.snapshot = snapshot,
+                        Err(error) => {
+                            self.status = Some(StatusMessage {
+                                text: error,
+                                error: true,
+                            });
+                        }
+                    }
+                    match result {
+                        Ok(report_id) => self.open_details(report_id),
+                        Err(error) => {
+                            self.status = Some(StatusMessage {
+                                text: format!("Could not scan the selected file: {error}"),
+                                error: true,
+                            });
+                        }
+                    }
+                    self.last_refresh = Instant::now();
+                    ctx.request_repaint();
+                }
                 WorkerEvent::SettingsFinished {
                     result,
                     config,
@@ -169,6 +214,7 @@ impl DesktopApp {
                     self.settings = SettingsDraft::from_config(
                         &self.config.read(),
                         crate::startup::is_enabled(),
+                        crate::context_menu::is_enabled(),
                     );
                     self.status = Some(match result {
                         Ok(text) => StatusMessage { text, error: false },

@@ -62,6 +62,7 @@ api_key = "test-only-personal-key"
             quarantine_dir: quarantine,
             monitor_enabled: false,
             start_at_login: true,
+            context_menu_enabled: true,
         };
         save_runtime_settings(&config_file, &settings).unwrap();
 
@@ -70,6 +71,7 @@ api_key = "test-only-personal-key"
         assert!(saved.contains("requests_per_minute = 3"));
         assert!(saved.contains("monitor_enabled = false"));
         assert!(saved.contains("start_at_login = true"));
+        assert!(saved.contains("context_menu_enabled = true"));
     }
 
     #[test]
@@ -82,6 +84,7 @@ api_key = "test-only-personal-key"
             quarantine_dir: downloads.join("quarantine"),
             monitor_enabled: true,
             start_at_login: false,
+            context_menu_enabled: false,
         };
 
         assert!(settings.validate().is_err());

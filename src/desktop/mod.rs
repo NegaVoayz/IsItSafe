@@ -2,14 +2,13 @@ mod actions;
 mod app;
 mod data;
 mod monitor;
+mod requests;
 mod settings;
 
 use std::fs;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
-use uuid::Uuid;
 
 use crate::config::{AppPaths, Config};
 use crate::db::Database;
@@ -19,50 +18,12 @@ use crate::watcher::Watcher;
 
 use app::DesktopApp;
 
+pub use requests::{open_details, open_scan};
+
 const MONITOR_MUTEX: &str = "Local\\IsItSafe.Monitor.v1";
 const MONITOR_STOP_EVENT: &str = "Local\\IsItSafe.Monitor.Stop.v1";
 const GUI_MUTEX: &str = "Local\\IsItSafe.Desktop.v1";
 const WINDOW_TITLE: &str = "IsItSafe";
-const DETAIL_REQUEST_EXTENSION: &str = "request";
-
-/// Queues a report for the running desktop process and wakes the native UI.
-/// Unique request files avoid partial reads and races between concurrent clicks.
-pub fn open_details(paths: &AppPaths, report_id: Uuid) -> Result<()> {
-    let requests = paths.data_dir.join("ui-requests");
-    fs::create_dir_all(&requests)
-        .with_context(|| format!("failed to create {}", requests.display()))?;
-    let timestamp = Utc::now().timestamp_nanos_opt().unwrap_or_default();
-    let request = requests.join(format!("{timestamp:039}-{report_id}.request"));
-    fs::write(&request, report_id.to_string())
-        .with_context(|| format!("failed to queue report details in {}", request.display()))
-}
-
-pub(crate) fn take_requested_details(paths: &AppPaths) -> Result<Option<Uuid>> {
-    let requests = paths.data_dir.join("ui-requests");
-    if !requests.exists() {
-        return Ok(None);
-    }
-    let mut paths_to_requests = fs::read_dir(&requests)?
-        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|value| value == DETAIL_REQUEST_EXTENSION)
-        })
-        .collect::<Vec<_>>();
-    paths_to_requests.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
-
-    let mut selected = None;
-    for request in paths_to_requests {
-        if selected.is_none()
-            && let Ok(value) = fs::read_to_string(&request)
-            && let Ok(report_id) = value.trim().parse::<Uuid>()
-        {
-            selected = Some(report_id);
-        }
-        let _ = fs::remove_file(request);
-    }
-    Ok(selected)
-}
 
 /// Launches the native desktop workspace or the headless download monitor.
 pub fn run(config: Config, paths: AppPaths, show_window: bool) -> Result<()> {
@@ -211,32 +172,5 @@ struct NamedMutex;
 impl NamedMutex {
     fn acquire(_name: &str) -> Result<Option<Self>> {
         Ok(Some(Self))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn app_paths(root: &std::path::Path) -> AppPaths {
-        AppPaths {
-            config_file: root.join("config.toml"),
-            data_dir: root.to_path_buf(),
-            database: root.join("state.db"),
-            reports_dir: root.join("reports"),
-            logs_dir: root.join("logs"),
-            rules_dir: root.join("rules"),
-        }
-    }
-
-    #[test]
-    fn detail_requests_are_consumed_once() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = app_paths(root.path());
-        let report_id = Uuid::new_v4();
-
-        open_details(&paths, report_id).unwrap();
-        assert_eq!(take_requested_details(&paths).unwrap(), Some(report_id));
-        assert_eq!(take_requested_details(&paths).unwrap(), None);
     }
 }

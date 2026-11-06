@@ -108,6 +108,45 @@ fn navigation_button(
     response.clicked()
 }
 
+fn toggle_switch(ui: &mut egui::Ui, enabled: &mut bool, label: &str) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
+    let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if response.clicked() {
+        *enabled = !*enabled;
+        response.mark_changed();
+    }
+
+    let color = if *enabled { ACCENT } else { MUTED };
+    ui.painter().text(
+        egui::pos2(rect.left(), rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(12.5),
+        if response.hovered() { TEXT } else { MUTED },
+    );
+    let track = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 21.0, rect.center().y),
+        Vec2::new(42.0, 22.0),
+    );
+    ui.painter()
+        .rect_filled(track, 11.0, color.gamma_multiply(if *enabled { 0.45 } else { 0.18 }));
+    ui.painter().rect_stroke(
+        track,
+        11.0,
+        Stroke::new(1.0, color.gamma_multiply(0.7)),
+        egui::StrokeKind::Inside,
+    );
+    let knob_x = if *enabled {
+        track.right() - 11.0
+    } else {
+        track.left() + 11.0
+    };
+    ui.painter()
+        .circle_filled(egui::pos2(knob_x, track.center().y), 8.0, color);
+    response
+}
+
 fn page_header(ui: &mut egui::Ui, title: &str, description: &str, note: Option<&str>) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {

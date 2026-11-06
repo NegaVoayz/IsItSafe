@@ -31,6 +31,7 @@ impl Default for RuntimeConfig {
         Self {
             monitor_enabled: true,
             start_at_login: false,
+            context_menu_enabled: false,
         }
     }
 }

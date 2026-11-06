@@ -21,6 +21,7 @@ struct SettingsDraft {
     quarantine_dir: String,
     monitor_enabled: bool,
     start_at_login: bool,
+    context_menu_enabled: bool,
 }
 
 pub(super) struct DesktopApp {

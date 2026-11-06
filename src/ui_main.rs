@@ -52,11 +52,26 @@ fn run() -> Result<()> {
         }
         return Ok(());
     }
+    let scan_file = if arguments
+        .first()
+        .is_some_and(|value| value == "--scan-file")
+    {
+        Some(std::path::PathBuf::from(
+            arguments
+                .get(1)
+                .ok_or_else(|| anyhow!("--scan-file requires a path"))?,
+        ))
+    } else {
+        None
+    };
     let background = arguments.iter().any(|argument| argument == "--background");
     let paths = AppPaths::discover()?;
     paths.ensure()?;
     let config = Config::load_or_create(&paths.config_file)?;
     config.validate()?;
     isitsafe::logging::initialize(&paths, &config)?;
+    if let Some(path) = scan_file {
+        isitsafe::desktop::open_scan(&paths, &path)?;
+    }
     isitsafe::desktop::run(config, paths, !background)
 }

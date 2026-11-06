@@ -3,6 +3,7 @@ use parking_lot::RwLock;
 use std::fs;
 
 use crate::config::{AppPaths, Config, RuntimeSettings, save_runtime_settings};
+use crate::context_menu;
 use crate::security::ensure_download_execution_barrier;
 use crate::startup;
 
@@ -28,9 +29,17 @@ pub fn apply_runtime_settings(
         ensure_download_execution_barrier(&desired.download_dir)?;
     }
     let startup_was_enabled = startup::is_enabled();
-    startup::set_enabled(desired.start_at_login)?;
+    let context_menu_was_enabled = context_menu::is_enabled();
+    let registration = startup::set_enabled(desired.start_at_login)
+        .and_then(|_| context_menu::set_enabled(desired.context_menu_enabled));
+    if let Err(error) = registration {
+        let _ = context_menu::set_enabled(context_menu_was_enabled);
+        let _ = startup::set_enabled(startup_was_enabled);
+        return Err(error);
+    }
     if let Err(error) = save_runtime_settings(&paths.config_file, &desired) {
         let _ = startup::set_enabled(startup_was_enabled);
+        let _ = context_menu::set_enabled(context_menu_was_enabled);
         return Err(error);
     }
 
@@ -40,6 +49,7 @@ pub fn apply_runtime_settings(
         live.storage.quarantine_dir = desired.quarantine_dir;
         live.runtime.monitor_enabled = desired.monitor_enabled;
         live.runtime.start_at_login = desired.start_at_login;
+        live.runtime.context_menu_enabled = desired.context_menu_enabled;
     }
 
     let restart_monitor = location_changed && monitor::is_running();
@@ -74,6 +84,7 @@ mod tests {
             quarantine_dir: quarantine.clone(),
             monitor_enabled: false,
             start_at_login: false,
+            context_menu_enabled: false,
         };
 
         save_runtime_settings(&config_file, &settings).unwrap();
@@ -82,5 +93,6 @@ mod tests {
         assert_eq!(loaded.download_dir, downloads);
         assert_eq!(loaded.storage.quarantine_dir, quarantine);
         assert!(!loaded.runtime.monitor_enabled);
+        assert!(!loaded.runtime.context_menu_enabled);
     }
 }

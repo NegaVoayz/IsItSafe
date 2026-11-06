@@ -6,6 +6,7 @@ pub struct RuntimeSettings {
     pub quarantine_dir: PathBuf,
     pub monitor_enabled: bool,
     pub start_at_login: bool,
+    pub context_menu_enabled: bool,
 }
 
 impl RuntimeSettings {
@@ -15,6 +16,7 @@ impl RuntimeSettings {
             quarantine_dir: config.storage.quarantine_dir.clone(),
             monitor_enabled: config.runtime.monitor_enabled,
             start_at_login: config.runtime.start_at_login,
+            context_menu_enabled: config.runtime.context_menu_enabled,
         }
     }
 
@@ -50,6 +52,7 @@ pub fn save_runtime_settings(path: &Path, settings: &RuntimeSettings) -> Result<
     document["storage"]["quarantine_dir"] = toml_edit::value(path_text(&settings.quarantine_dir));
     document["runtime"]["monitor_enabled"] = toml_edit::value(settings.monitor_enabled);
     document["runtime"]["start_at_login"] = toml_edit::value(settings.start_at_login);
+    document["runtime"]["context_menu_enabled"] = toml_edit::value(settings.context_menu_enabled);
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

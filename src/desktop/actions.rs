@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::thread;
 
@@ -9,6 +10,7 @@ use crate::config::{AppPaths, Config, RuntimeSettings};
 use crate::db::Database;
 use crate::interaction::{DecisionSource, execute_user_decision, restore_quarantine_from_desktop};
 use crate::report::{AnalysisReportV1, UserDecision};
+use crate::watcher::Watcher;
 
 use super::data::{DesktopSnapshot, load_snapshot, most_risky_component_first};
 
@@ -18,6 +20,7 @@ pub enum WorkerRequest {
     Quarantine(Uuid),
     Restore { sha256: String, file_name: String },
     LoadReport(Uuid),
+    ScanFile(PathBuf),
     SaveSettings(RuntimeSettings),
 }
 
@@ -30,6 +33,10 @@ pub enum WorkerEvent {
     },
     ActionFinished {
         message: Result<String, String>,
+        snapshot: Result<DesktopSnapshot, String>,
+    },
+    ScanFinished {
+        result: Result<Uuid, String>,
         snapshot: Result<DesktopSnapshot, String>,
     },
     SettingsFinished {
@@ -103,6 +110,23 @@ impl Worker {
                                 })
                                 .map_err(error_text);
                             let _ = event_tx.send(WorkerEvent::ReportLoaded { report_id, result });
+                        }
+                        WorkerRequest::ScanFile(path) => {
+                            let live = config.read().clone();
+                            let scan_paths = (*paths).clone();
+                            let result = (|| -> anyhow::Result<Uuid> {
+                                let database = Database::open_with_recovery(&scan_paths.database)?;
+                                let watcher = Watcher::new(live, database, scan_paths);
+                                watcher
+                                    .process_path_with_prompt(&path, true)
+                                    .map(|report| report.report_id)
+                            })()
+                            .map_err(error_text);
+                            let snapshot = {
+                                let live = config.read();
+                                load_snapshot(&live, &database, &paths).map_err(error_text)
+                            };
+                            let _ = event_tx.send(WorkerEvent::ScanFinished { result, snapshot });
                         }
                         WorkerRequest::SaveSettings(settings) => {
                             let apply_result =

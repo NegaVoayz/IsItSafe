@@ -34,6 +34,8 @@ pub struct RuntimeConfig {
     pub monitor_enabled: bool,
     /// Mirror of the per-user Windows sign-in registration managed by the UI.
     pub start_at_login: bool,
+    /// Mirror of the per-user Explorer file context-menu registration.
+    pub context_menu_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,10 +1,11 @@
 impl SettingsDraft {
-    fn from_config(config: &Config, start_at_login: bool) -> Self {
+    fn from_config(config: &Config, start_at_login: bool, context_menu_enabled: bool) -> Self {
         Self {
             download_dir: config.download_dir.display().to_string(),
             quarantine_dir: config.storage.quarantine_dir.display().to_string(),
             monitor_enabled: config.runtime.monitor_enabled,
             start_at_login,
+            context_menu_enabled,
         }
     }
 
@@ -14,6 +15,7 @@ impl SettingsDraft {
             quarantine_dir: PathBuf::from(self.quarantine_dir.trim()),
             monitor_enabled: self.monitor_enabled,
             start_at_login: self.start_at_login,
+            context_menu_enabled: self.context_menu_enabled,
         };
         settings
             .validate()
@@ -36,6 +38,7 @@ impl DesktopApp {
         let mut browse_quarantine = false;
         let mut save = false;
         let mut reset = false;
+        let mut monitor_toggled = false;
         let drives = quarantine_drives();
         let validation = self.settings.runtime_settings();
 
@@ -46,8 +49,19 @@ impl DesktopApp {
             .show(ui, |ui| {
                 settings_card(ui, "MONITORING", |ui| {
                     let monitor_changed = ui
-                        .checkbox(&mut self.settings.monitor_enabled, "Monitor downloads now")
+                        .add_enabled_ui(!self.busy, |ui| {
+                            ui.scope(|ui| {
+                                toggle_switch(
+                                    ui,
+                                    &mut self.settings.monitor_enabled,
+                                    "Monitor downloads",
+                                )
+                            })
+                            .inner
+                        })
+                        .inner
                         .changed();
+                    monitor_toggled = monitor_changed;
                     if monitor_changed && !self.settings.monitor_enabled {
                         self.settings.start_at_login = false;
                     }
@@ -60,6 +74,10 @@ impl DesktopApp {
                     if startup_changed && self.settings.start_at_login {
                         self.settings.monitor_enabled = true;
                     }
+                    ui.checkbox(
+                        &mut self.settings.context_menu_enabled,
+                        "Add “Is It Safe?” to the file right-click menu",
+                    );
                     ui.add_space(8.0);
                     let (color, text) = if self.monitor_running {
                         (ACCENT, "Monitor active")
@@ -180,9 +198,13 @@ impl DesktopApp {
         }
         if reset {
             self.settings =
-                SettingsDraft::from_config(&self.config.read(), crate::startup::is_enabled());
+                SettingsDraft::from_config(
+                    &self.config.read(),
+                    crate::startup::is_enabled(),
+                    crate::context_menu::is_enabled(),
+                );
             self.status = None;
-        } else if save {
+        } else if save || monitor_toggled {
             match validation {
                 Ok(settings) => self.save_settings(settings),
                 Err(error) => {
