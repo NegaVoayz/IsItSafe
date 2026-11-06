@@ -205,7 +205,7 @@ impl DesktopApp {
                 );
             self.status = None;
         } else if save || monitor_toggled {
-            match validation {
+            match self.settings.runtime_settings() {
                 Ok(settings) => self.save_settings(settings),
                 Err(error) => {
                     self.status = Some(StatusMessage { text: error, error: true });
