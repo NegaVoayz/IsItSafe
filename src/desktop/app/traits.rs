@@ -7,7 +7,7 @@ impl eframe::App for DesktopApp {
             self.last_refresh = Instant::now();
         }
         if self.last_monitor_check.elapsed() >= Duration::from_secs(2) {
-            self.monitor_running = super::monitor_is_running();
+            self.monitor_running = super::monitor::is_running();
             self.last_monitor_check = Instant::now();
         }
         if !self.busy && self.last_detail_request_check.elapsed() >= Duration::from_millis(250) {

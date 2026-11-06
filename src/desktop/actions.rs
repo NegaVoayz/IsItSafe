@@ -1,10 +1,11 @@
 use std::sync::{Arc, mpsc};
 use std::thread;
 
+use parking_lot::RwLock;
 use uuid::Uuid;
 
 use crate::capture::escape_controls;
-use crate::config::{AppPaths, Config};
+use crate::config::{AppPaths, Config, RuntimeSettings};
 use crate::db::Database;
 use crate::interaction::{DecisionSource, execute_user_decision, restore_quarantine_from_desktop};
 use crate::report::{AnalysisReportV1, UserDecision};
@@ -17,6 +18,7 @@ pub enum WorkerRequest {
     Quarantine(Uuid),
     Restore { sha256: String, file_name: String },
     LoadReport(Uuid),
+    SaveSettings(RuntimeSettings),
 }
 
 #[derive(Debug)]
@@ -30,6 +32,12 @@ pub enum WorkerEvent {
         message: Result<String, String>,
         snapshot: Result<DesktopSnapshot, String>,
     },
+    SettingsFinished {
+        result: Result<String, String>,
+        config: Box<Config>,
+        monitor_running: bool,
+        snapshot: Result<DesktopSnapshot, String>,
+    },
 }
 
 pub struct Worker {
@@ -38,7 +46,11 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn start(config: Arc<Config>, database: Arc<Database>, paths: Arc<AppPaths>) -> Self {
+    pub fn start(
+        config: Arc<RwLock<Config>>,
+        database: Arc<Database>,
+        paths: Arc<AppPaths>,
+    ) -> Self {
         let (request_tx, request_rx) = mpsc::channel::<WorkerRequest>();
         let (event_tx, event_rx) = mpsc::channel::<WorkerEvent>();
         thread::Builder::new()
@@ -47,32 +59,35 @@ impl Worker {
                 while let Ok(request) = request_rx.recv() {
                     match request {
                         WorkerRequest::Refresh => {
+                            let live = config.read();
                             let snapshot =
-                                load_snapshot(&config, &database, &paths).map_err(error_text);
+                                load_snapshot(&live, &database, &paths).map_err(error_text);
                             let _ = event_tx.send(WorkerEvent::Snapshot(snapshot));
                         }
                         WorkerRequest::Quarantine(report_id) => {
+                            let live = config.read();
                             let message = execute_user_decision(
                                 report_id,
                                 UserDecision::Quarantine,
                                 DecisionSource::Desktop,
-                                &config,
+                                &live,
                                 &database,
                                 &paths,
                             )
                             .map_err(error_text);
                             let snapshot =
-                                load_snapshot(&config, &database, &paths).map_err(error_text);
+                                load_snapshot(&live, &database, &paths).map_err(error_text);
                             let _ =
                                 event_tx.send(WorkerEvent::ActionFinished { message, snapshot });
                         }
                         WorkerRequest::Restore { sha256, file_name } => {
+                            let live = config.read();
                             let message = restore_quarantine_from_desktop(
-                                &database, &config, &paths, &sha256, &file_name,
+                                &database, &live, &paths, &sha256, &file_name,
                             )
                             .map_err(error_text);
                             let snapshot =
-                                load_snapshot(&config, &database, &paths).map_err(error_text);
+                                load_snapshot(&live, &database, &paths).map_err(error_text);
                             let _ =
                                 event_tx.send(WorkerEvent::ActionFinished { message, snapshot });
                         }
@@ -88,6 +103,21 @@ impl Worker {
                                 })
                                 .map_err(error_text);
                             let _ = event_tx.send(WorkerEvent::ReportLoaded { report_id, result });
+                        }
+                        WorkerRequest::SaveSettings(settings) => {
+                            let apply_result =
+                                super::settings::apply_runtime_settings(&config, &paths, settings);
+                            let snapshot = {
+                                let live = config.read();
+                                load_snapshot(&live, &database, &paths).map_err(error_text)
+                            };
+                            let result = apply_result.map_err(error_text);
+                            let _ = event_tx.send(WorkerEvent::SettingsFinished {
+                                result,
+                                config: Box::new(config.read().clone()),
+                                monitor_running: super::monitor::is_running(),
+                                snapshot,
+                            });
                         }
                     }
                 }

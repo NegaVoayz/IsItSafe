@@ -1,14 +1,13 @@
 mod actions;
 mod app;
 mod data;
+mod monitor;
+mod settings;
 
 use std::fs;
-use std::process::Command;
 use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -21,6 +20,7 @@ use crate::watcher::Watcher;
 use app::DesktopApp;
 
 const MONITOR_MUTEX: &str = "Local\\IsItSafe.Monitor.v1";
+const MONITOR_STOP_EVENT: &str = "Local\\IsItSafe.Monitor.Stop.v1";
 const GUI_MUTEX: &str = "Local\\IsItSafe.Desktop.v1";
 const WINDOW_TITLE: &str = "IsItSafe";
 const DETAIL_REQUEST_EXTENSION: &str = "request";
@@ -75,10 +75,14 @@ pub fn run(config: Config, paths: AppPaths, show_window: bool) -> Result<()> {
         return Ok(());
     };
 
-    ensure_background_monitor()?;
+    if config.runtime.monitor_enabled {
+        monitor::ensure_running()?;
+    } else if monitor::is_running() {
+        monitor::stop()?;
+    }
     initialize_download_security(&config)?;
     let database = Arc::new(Database::open_with_recovery(&paths.database)?);
-    let config = Arc::new(config);
+    let config = Arc::new(parking_lot::RwLock::new(config));
     let paths = Arc::new(paths);
     run_egui(config, database, paths)
 }
@@ -87,13 +91,23 @@ fn run_monitor(config: Config, paths: AppPaths) -> Result<()> {
     let Some(_monitor_lease) = NamedMutex::acquire(MONITOR_MUTEX)? else {
         return Ok(());
     };
+    if !config.runtime.monitor_enabled {
+        return Ok(());
+    }
+    let stop_event = monitor::MonitorStop::create()?;
     initialize_download_security(&config)?;
     let database = Database::open_with_recovery(&paths.database)?;
     let watcher = Watcher::new(config, database, paths);
-    watcher.run_with_prompt(true)
+    watcher.run_with_prompt_and_stop(true, || stop_event.is_requested())
 }
 
 fn initialize_download_security(config: &Config) -> Result<()> {
+    fs::create_dir_all(config.quarantine_dir()).with_context(|| {
+        format!(
+            "failed to create quarantine directory {}",
+            config.quarantine_dir().display()
+        )
+    })?;
     if config.security.block_execution_in_download_dir {
         ensure_download_execution_barrier(&config.download_dir)?;
     }
@@ -103,41 +117,11 @@ fn initialize_download_security(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn ensure_background_monitor() -> Result<()> {
-    if monitor_is_running() {
-        return Ok(());
-    }
-    let executable = std::env::current_exe().context("cannot locate the IsItSafe executable")?;
-    let mut command = Command::new(&executable);
-    if executable
-        .file_stem()
-        .is_some_and(|value| value.eq_ignore_ascii_case("isitsafe"))
-    {
-        command.arg("ui").arg("--background");
-    } else {
-        command.arg("--background");
-    }
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start {}", executable.display()))?;
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if monitor_is_running() {
-            return Ok(());
-        }
-        if let Some(status) = child.try_wait()? {
-            if !monitor_is_running() {
-                bail!("the background monitor exited during startup ({status})");
-            }
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    bail!("the background monitor did not become ready within 5 seconds")
-}
-
-fn run_egui(config: Arc<Config>, database: Arc<Database>, paths: Arc<AppPaths>) -> Result<()> {
+fn run_egui(
+    config: Arc<parking_lot::RwLock<Config>>,
+    database: Arc<Database>,
+    paths: Arc<AppPaths>,
+) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title(WINDOW_TITLE)
@@ -152,28 +136,6 @@ fn run_egui(config: Arc<Config>, database: Arc<Database>, paths: Arc<AppPaths>) 
         Box::new(move |creation| Ok(Box::new(DesktopApp::new(creation, config, database, paths)))),
     )
     .map_err(|error| anyhow::anyhow!("native desktop UI failed: {error}"))
-}
-
-#[cfg(windows)]
-fn monitor_is_running() -> bool {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
-
-    let name = wide(MONITOR_MUTEX);
-    let handle = unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) };
-    if handle.is_null() {
-        false
-    } else {
-        unsafe {
-            CloseHandle(handle);
-        }
-        true
-    }
-}
-
-#[cfg(not(windows))]
-fn monitor_is_running() -> bool {
-    false
 }
 
 #[cfg(windows)]
@@ -263,7 +225,6 @@ mod tests {
             database: root.join("state.db"),
             reports_dir: root.join("reports"),
             logs_dir: root.join("logs"),
-            quarantine_dir: root.join("quarantine"),
             rules_dir: root.join("rules"),
         }
     }

@@ -2,6 +2,7 @@
 enum Page {
     Review,
     Quarantine,
+    Settings,
     Details,
 }
 
@@ -15,8 +16,15 @@ struct StatusMessage {
     error: bool,
 }
 
+struct SettingsDraft {
+    download_dir: String,
+    quarantine_dir: String,
+    monitor_enabled: bool,
+    start_at_login: bool,
+}
+
 pub(super) struct DesktopApp {
-    config: Arc<Config>,
+    config: Arc<parking_lot::RwLock<Config>>,
     paths: Arc<AppPaths>,
     worker: Worker,
     snapshot: DesktopSnapshot,
@@ -24,6 +32,7 @@ pub(super) struct DesktopApp {
     selected_report_id: Option<Uuid>,
     selected_report: Option<AnalysisReportV1>,
     restore_prompt: Option<RestorePrompt>,
+    settings: SettingsDraft,
     status: Option<StatusMessage>,
     busy: bool,
     busy_message: Option<&'static str>,

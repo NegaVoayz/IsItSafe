@@ -64,7 +64,7 @@ impl DesktopApp {
 
                 if navigation_button(
                     ui,
-                    self.page != Page::Quarantine,
+                    self.page == Page::Review,
                     "Review",
                     Some(self.snapshot.questionable.len()),
                     DANGER,
@@ -79,6 +79,15 @@ impl DesktopApp {
                     WARNING,
                 ) {
                     self.page = Page::Quarantine;
+                }
+                if navigation_button(
+                    ui,
+                    self.page == Page::Settings,
+                    "Settings",
+                    None,
+                    MUTED,
+                ) {
+                    self.page = Page::Settings;
                 }
 
                 ui.add_space(26.0);
@@ -153,6 +162,7 @@ impl DesktopApp {
             .show(root, |ui| match self.page {
                 Page::Review => self.render_review(ui),
                 Page::Quarantine => self.render_quarantine(ui),
+                Page::Settings => self.render_settings(ui),
                 Page::Details => self.render_details(ui),
             });
     }

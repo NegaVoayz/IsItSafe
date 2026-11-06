@@ -1,7 +1,7 @@
 impl DesktopApp {
     pub(super) fn new(
         creation: &eframe::CreationContext<'_>,
-        config: Arc<Config>,
+        config: Arc<parking_lot::RwLock<Config>>,
         database: Arc<Database>,
         paths: Arc<AppPaths>,
     ) -> Self {
@@ -9,7 +9,11 @@ impl DesktopApp {
         let requested_details = super::take_requested_details(&paths);
         let worker = Worker::start(Arc::clone(&config), database, Arc::clone(&paths));
         let _ = worker.send(WorkerRequest::Refresh);
-        let monitor_running = super::monitor_is_running();
+        let monitor_running = super::monitor::is_running();
+        let settings = {
+            let live = config.read();
+            SettingsDraft::from_config(&live, crate::startup::is_enabled())
+        };
         let mut app = Self {
             config,
             paths,
@@ -19,6 +23,7 @@ impl DesktopApp {
             selected_report_id: None,
             selected_report: None,
             restore_prompt: None,
+            settings,
             status: None,
             busy: false,
             busy_message: None,
@@ -139,6 +144,36 @@ impl DesktopApp {
                             self.status = Some(StatusMessage { text, error: true });
                         }
                     }
+                    match snapshot {
+                        Ok(snapshot) => self.snapshot = snapshot,
+                        Err(error) => {
+                            self.status = Some(StatusMessage {
+                                text: error,
+                                error: true,
+                            });
+                        }
+                    }
+                    self.last_refresh = Instant::now();
+                    ctx.request_repaint();
+                }
+                WorkerEvent::SettingsFinished {
+                    result,
+                    config,
+                    monitor_running,
+                    snapshot,
+                } => {
+                    self.busy = false;
+                    self.busy_message = None;
+                    *self.config.write() = *config;
+                    self.monitor_running = monitor_running;
+                    self.settings = SettingsDraft::from_config(
+                        &self.config.read(),
+                        crate::startup::is_enabled(),
+                    );
+                    self.status = Some(match result {
+                        Ok(text) => StatusMessage { text, error: false },
+                        Err(text) => StatusMessage { text, error: true },
+                    });
                     match snapshot {
                         Ok(snapshot) => self.snapshot = snapshot,
                         Err(error) => {

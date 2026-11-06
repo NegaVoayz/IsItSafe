@@ -20,7 +20,7 @@ mod platform;
 pub use integration::origin;
 pub use network::{revocation, rules};
 pub(crate) use platform::process;
-pub use platform::{logging, notification_activator, secrets, security};
+pub use platform::{logging, notification_activator, secrets, security, startup};
 
 pub use analysis::analyze_bytes;
 pub use config::Config;

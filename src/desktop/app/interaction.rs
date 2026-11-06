@@ -34,8 +34,9 @@ impl DesktopApp {
         let mut confirmed = false;
         let mut cancel = false;
         let validation = validate_download_file_name(&prompt.file_name);
+        let download_dir = self.config.read().download_dir.clone();
         let destination_exists =
-            validation.is_ok() && self.config.download_dir.join(&prompt.file_name).exists();
+            validation.is_ok() && download_dir.join(&prompt.file_name).exists();
 
         egui::Window::new("Restore to Downloads")
             .open(&mut open)
@@ -66,10 +67,7 @@ impl DesktopApp {
                 ui.label(
                     RichText::new(format!(
                         "Destination: {}",
-                        self.config
-                            .download_dir
-                            .join(&prompt.file_name)
-                            .display()
+                        download_dir.join(&prompt.file_name).display()
                     ))
                     .size(10.5)
                     .color(MUTED),

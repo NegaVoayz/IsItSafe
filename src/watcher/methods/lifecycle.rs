@@ -12,6 +12,16 @@ impl Watcher {
     }
 
     pub fn run_with_prompt(&self, interactive: bool) -> Result<()> {
+        self.run_with_prompt_and_stop(interactive, || false)
+    }
+
+    pub fn run_with_prompt_and_stop<F>(&self, interactive: bool, should_stop: F) -> Result<()>
+    where
+        F: Fn() -> bool,
+    {
+        if should_stop() {
+            return Ok(());
+        }
         self.recover_state()?;
         self.prune_report_storage()?;
         let (event_tx, event_rx) = mpsc::channel();
@@ -63,6 +73,9 @@ impl Watcher {
         let mut last_checkpoint = Instant::now();
         let mut last_integrity = Instant::now();
         loop {
+            if should_stop() {
+                break;
+            }
             match event_rx.recv_timeout(Duration::from_millis(200)) {
                 Ok(Ok(event)) => {
                     self.handle_event(event, &mut debounce, &work_tx, debounce_window)?
@@ -137,8 +150,11 @@ impl Watcher {
                 last_integrity = Instant::now();
             }
         }
+        let stopped = should_stop();
         drop(work_tx);
-        let _ = worker.join();
+        if !stopped {
+            let _ = worker.join();
+        }
         Ok(())
     }
 

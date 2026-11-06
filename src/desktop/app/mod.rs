@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -10,7 +10,7 @@ use eframe::egui::{
 };
 use uuid::Uuid;
 
-use crate::config::{AppPaths, Config};
+use crate::config::{AppPaths, Config, RuntimeSettings};
 use crate::db::Database;
 use crate::interaction::validate_download_file_name;
 use crate::report::{
@@ -43,6 +43,7 @@ include!("lifecycle.rs");
 include!("frame.rs");
 include!("pages/review.rs");
 include!("pages/details.rs");
+include!("pages/settings.rs");
 include!("interaction.rs");
 include!("traits.rs");
 include!("style.rs");
