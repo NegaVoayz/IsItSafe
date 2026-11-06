@@ -1,0 +1,9 @@
+[advisories]
+ignore = [
+  # Public-key signatures are verified only; this process never performs RSA
+  # private-key operations that trigger the Marvin timing attack.
+  "RUSTSEC-2023-0071",
+  # object enables its optional compression feature by default, but
+  # cross-authenticode only parses uncompressed PE data.
+  "RUSTSEC-2026-0344",
+]

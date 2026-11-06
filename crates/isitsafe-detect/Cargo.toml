@@ -6,5 +6,5 @@ rust-version = "1.95"
 license = "MIT"
 
 [dependencies]
-isitsafe-report = { path = "../isitsafe-report" }
-zip = { version = "2", default-features = false, features = ["deflate", "bzip2", "lzma", "time"] }
+isitsafe-report = { version = "0.1.0", path = "../isitsafe-report" }
+zip = { version = "9", default-features = false, features = ["deflate", "bzip2", "lzma", "time"] }

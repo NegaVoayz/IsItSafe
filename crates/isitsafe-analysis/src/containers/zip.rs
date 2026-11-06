@@ -48,7 +48,20 @@ fn analyze_zip(
                 continue;
             }
         };
-        let raw_name = entry.name().to_string();
+        let raw_name = match entry.name() {
+            Ok(name) => name.into_owned(),
+            Err(error) => {
+                analysis.facts.push(evidence(
+                    format!("container:invalid_name:{index}"),
+                    "archive_unsafe_name",
+                    Severity::Medium,
+                    format!("ZIP entry {index} has an invalid UTF-8 name: {error}"),
+                    "child ZIP parser",
+                    Confidence::Structural,
+                ));
+                continue;
+            }
+        };
         let name = escape_component_name(&raw_name);
         if entry.enclosed_name().is_none() {
             analysis.facts.push(evidence(
@@ -127,7 +140,13 @@ fn analyze_zip(
             });
             continue;
         }
-        let data_start = entry.data_start();
+        let Some(data_start) = entry.data_start() else {
+            analysis.boundaries.push(Boundary {
+                kind: BoundaryKind::UnsupportedFormat,
+                detail: format!("ZIP entry data offset is unavailable: {name}"),
+            });
+            continue;
+        };
         ranges.push((data_start, data_start + entry.compressed_size()));
         let take_limit = budget.limits.entry_max_bytes.min(
             budget
