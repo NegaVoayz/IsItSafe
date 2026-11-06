@@ -63,37 +63,48 @@ fn navigation_button(
     count: Option<usize>,
     color: Color32,
 ) -> bool {
-    let response = Frame::new()
-        .fill(if selected {
-            color.gamma_multiply(0.12)
-        } else {
-            Color32::TRANSPARENT
-        })
-        .inner_margin(egui::Margin::symmetric(10, 9))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let (dot, _) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
-                ui.painter().circle_filled(dot.center(), 3.5, color);
-                ui.label(RichText::new(label).size(13.0).color(if selected {
-                    TEXT
-                } else {
-                    MUTED
-                }));
-                if let Some(count) = count {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(count.to_string())
-                                .monospace()
-                                .size(11.0)
-                                .color(if selected { color } else { MUTED }),
-                        );
-                    });
-                }
-            });
-        })
-        .response
-        .interact(Sense::click());
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), 36.0),
+        Sense::click(),
+    );
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let hovered = response.hovered();
+    let fill = if selected {
+        color.gamma_multiply(if hovered { 0.20 } else { 0.12 })
+    } else if hovered {
+        color.gamma_multiply(0.08)
+    } else {
+        Color32::TRANSPARENT
+    };
+    ui.painter().rect_filled(rect, 8.0, fill);
+    if hovered {
+        ui.painter().rect_stroke(
+            rect,
+            8.0,
+            Stroke::new(1.0, color.gamma_multiply(0.32)),
+            egui::StrokeKind::Inside,
+        );
+    }
+
+    let center_y = rect.center().y;
+    let dot = egui::pos2(rect.left() + 14.0, center_y);
+    ui.painter().circle_filled(dot, 3.5, color);
+    ui.painter().text(
+        egui::pos2(rect.left() + 27.0, center_y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(13.0),
+        if selected || hovered { TEXT } else { MUTED },
+    );
+    if let Some(count) = count {
+        ui.painter().text(
+            egui::pos2(rect.right() - 14.0, center_y),
+            Align2::RIGHT_CENTER,
+            count,
+            FontId::monospace(11.0),
+            if selected { color } else { MUTED },
+        );
+    }
     response.clicked()
 }
 
