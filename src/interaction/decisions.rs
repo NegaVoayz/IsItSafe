@@ -30,7 +30,7 @@ pub fn execute_user_decision(
             report.policy.user_decision = Some(UserDecision::Quarantine);
             report.policy.quarantine_requested = true;
             report.policy.action = PolicyAction::Quarantine;
-            match apply_quarantine(&report, config, database, &paths.quarantine_dir) {
+            match apply_quarantine(&report, config, database, config.quarantine_dir()) {
                 Ok(Some(destination)) => {
                     report.policy.quarantine_path =
                         Some(destination.to_string_lossy().into_owned());

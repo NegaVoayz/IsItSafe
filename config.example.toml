@@ -1,5 +1,14 @@
 download_dir = 'C:\Users\me\Downloads'
 
+[storage]
+# Choose any writable folder on another drive. Existing quarantine entries are
+# never moved when this setting changes.
+quarantine_dir = 'C:\Users\me\AppData\Local\IsItSafe\quarantine'
+
+[runtime]
+monitor_enabled = true
+start_at_login = false
+
 [security]
 block_execution_in_download_dir = true
 

@@ -206,7 +206,6 @@ mod tests {
                 database: root.join("state.db"),
                 reports_dir: root.join("reports"),
                 logs_dir: root.join("logs"),
-                quarantine_dir: root.join("quarantine"),
                 rules_dir: root.join("rules"),
             })
             .starts_with(root)

@@ -77,6 +77,7 @@
             download_dir: downloads.clone(),
             ..Config::default()
         };
+        config.storage.quarantine_dir = quarantine.clone();
         config.security.block_execution_in_download_dir = false;
         let paths = AppPaths {
             config_file: root.path().join("config.toml"),
@@ -84,7 +85,6 @@
             database: root.path().join("state.db"),
             reports_dir: root.path().join("reports"),
             logs_dir: root.path().join("logs"),
-            quarantine_dir: quarantine.clone(),
             rules_dir: root.path().join("rules"),
         };
         paths.ensure().unwrap();

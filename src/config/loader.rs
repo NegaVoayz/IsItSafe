@@ -12,6 +12,12 @@ impl Config {
     }
 
     pub fn load_or_create(path: &Path) -> Result<Self> {
+        let backup = path.with_extension("toml.bak");
+        if !path.exists() && backup.exists() {
+            fs::rename(&backup, path).with_context(|| {
+                format!("failed to recover configuration backup {}", backup.display())
+            })?;
+        }
         if path.exists() {
             return Self::load(path);
         }
@@ -50,6 +56,12 @@ impl Config {
         if self.events.debounce_ms == 0 {
             bail!("events.debounce_ms must be greater than zero");
         }
+        if !self.download_dir.is_absolute() {
+            bail!("download_dir must be an absolute path");
+        }
+        if !self.storage.quarantine_dir.is_absolute() {
+            bail!("storage.quarantine_dir must be an absolute path");
+        }
         if self.virus_total.requests_per_minute == 0 {
             bail!("virus_total.requests_per_minute must be greater than zero");
         }
@@ -86,6 +98,10 @@ impl Config {
     pub fn lock_timeout(&self) -> Duration {
         Duration::from_millis(self.limits.lock_acquisition_timeout_ms)
     }
+
+    pub fn quarantine_dir(&self) -> &Path {
+        &self.storage.quarantine_dir
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +111,6 @@ pub struct AppPaths {
     pub database: PathBuf,
     pub reports_dir: PathBuf,
     pub logs_dir: PathBuf,
-    pub quarantine_dir: PathBuf,
     pub rules_dir: PathBuf,
 }
 
@@ -118,7 +133,6 @@ impl AppPaths {
             database: data_dir.join("state.db"),
             reports_dir: data_dir.join("reports"),
             logs_dir: data_dir.join("logs"),
-            quarantine_dir: data_dir.join("quarantine"),
             rules_dir: data_dir.join("rules"),
             data_dir,
         })
@@ -128,7 +142,6 @@ impl AppPaths {
         fs::create_dir_all(&self.data_dir)?;
         fs::create_dir_all(&self.reports_dir)?;
         fs::create_dir_all(&self.logs_dir)?;
-        fs::create_dir_all(&self.quarantine_dir)?;
         fs::create_dir_all(&self.rules_dir)?;
         if let Some(parent) = self.config_file.parent() {
             fs::create_dir_all(parent)?;

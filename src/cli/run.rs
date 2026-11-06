@@ -39,11 +39,8 @@ fn run() -> Result<()> {
         Commands::Watch { no_prompt } => {
             initialize_download_security(&config)?;
             let database = Database::open_with_recovery(&paths.database)?;
-            let removed = prune_quarantine(
-                &database,
-                &paths.quarantine_dir,
-                config.policy.quarantine_retention_days,
-            )?;
+            let removed =
+                prune_quarantine(&database, config.policy.quarantine_retention_days)?;
             if removed > 0 {
                 tracing::info!(removed, "expired quarantine entries removed");
             }
@@ -108,11 +105,8 @@ fn run() -> Result<()> {
                     destination,
                 } => restore_quarantine(&database, &config, &sha256, &destination)?,
                 QuarantineCommand::Prune => {
-                    let removed = prune_quarantine(
-                        &database,
-                        &paths.quarantine_dir,
-                        config.policy.quarantine_retention_days,
-                    )?;
+                    let removed =
+                        prune_quarantine(&database, config.policy.quarantine_retention_days)?;
                     tracing::info!(removed, "expired quarantine entries removed");
                     println!("pruned {removed} expired quarantine entries");
                 }

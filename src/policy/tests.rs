@@ -158,6 +158,19 @@
     }
 
     #[test]
+    fn quarantine_pruning_accepts_old_roots_but_checks_the_hash_name() {
+        let hash = "a".repeat(64);
+        assert!(quarantine_entry_matches_record(
+            Path::new(r"D:\OldQuarantine\setup.exe.aaaaaaaaaaaa.quarantined"),
+            &hash
+        ));
+        assert!(!quarantine_entry_matches_record(
+            Path::new(r"D:\OldQuarantine\unrelated.exe"),
+            &hash
+        ));
+    }
+
+    #[test]
     fn verified_removal_requires_the_reviewed_hash() {
         let directory = tempfile::tempdir().unwrap();
         let source = directory.path().join("sample.bin");

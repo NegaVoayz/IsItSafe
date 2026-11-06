@@ -79,11 +79,7 @@ pub fn remove_verified(report: &AnalysisReportV1, config: &Config) -> Result<()>
     Ok(())
 }
 
-pub fn prune_quarantine(
-    database: &Database,
-    quarantine_root: &Path,
-    retention_days: u64,
-) -> Result<usize> {
+pub fn prune_quarantine(database: &Database, retention_days: u64) -> Result<usize> {
     if retention_days == 0 {
         bail!("quarantine retention must be greater than zero");
     }
@@ -94,36 +90,33 @@ pub fn prune_quarantine(
             continue;
         }
         if path.exists() {
-            let canonical_root = quarantine_root.canonicalize().with_context(|| {
-                format!(
-                    "quarantine root is unavailable: {}",
-                    quarantine_root.display()
-                )
-            })?;
-            let canonical_path = path
-                .canonicalize()
-                .with_context(|| format!("quarantine entry is unavailable: {}", path.display()))?;
-            if !canonical_path.starts_with(&canonical_root) {
-                bail!(
-                    "refusing to prune quarantine entry outside {}: {}",
-                    canonical_root.display(),
-                    canonical_path.display()
-                );
-            }
-            let metadata = fs::symlink_metadata(&canonical_path)?;
+            let metadata = fs::symlink_metadata(&path)?;
             if metadata.file_type().is_symlink() {
+                bail!("refusing to prune reparse-point quarantine entry: {}", path.display());
+            }
+            if !quarantine_entry_matches_record(&path, &sha256) {
                 bail!(
-                    "refusing to prune reparse-point quarantine entry: {}",
-                    canonical_path.display()
+                    "refusing to prune a path that does not match its quarantine hash: {}",
+                    path.display()
                 );
             }
-            fs::remove_file(&canonical_path)
-                .with_context(|| format!("failed to remove {}", canonical_path.display()))?;
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
         }
         database.remove_quarantine_record(&sha256)?;
         removed += 1;
     }
     Ok(removed)
+}
+
+fn quarantine_entry_matches_record(path: &Path, sha256: &str) -> bool {
+    let expected_prefix = format!(".{}", &sha256[..sha256.len().min(12)]);
+    let name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    path.extension().and_then(|value| value.to_str()) == Some("quarantined")
+        && name.contains(&expected_prefix)
 }
 
 pub fn restore_quarantine(

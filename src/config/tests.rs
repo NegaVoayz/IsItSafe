@@ -40,3 +40,49 @@ api_key = "test-only-personal-key"
 
         assert_eq!(development_config_file_from(&executable), Some(config));
     }
+
+    #[test]
+    fn runtime_settings_preserve_secrets_and_unrelated_options() {
+        let directory = tempfile::tempdir().unwrap();
+        let downloads = directory.path().join("Downloads");
+        let quarantine = directory.path().join("Quarantine");
+        fs::create_dir_all(&downloads).unwrap();
+        let config_file = directory.path().join("config.toml");
+        fs::write(
+            &config_file,
+            format!(
+                "download_dir = '{}'\n\n[virus_total]\napi_key = 'keep-me'\nrequests_per_minute = 3\n",
+                downloads.display()
+            ),
+        )
+        .unwrap();
+
+        let settings = RuntimeSettings {
+            download_dir: downloads,
+            quarantine_dir: quarantine,
+            monitor_enabled: false,
+            start_at_login: true,
+        };
+        save_runtime_settings(&config_file, &settings).unwrap();
+
+        let saved = fs::read_to_string(config_file).unwrap();
+        assert!(saved.contains("api_key = 'keep-me'"));
+        assert!(saved.contains("requests_per_minute = 3"));
+        assert!(saved.contains("monitor_enabled = false"));
+        assert!(saved.contains("start_at_login = true"));
+    }
+
+    #[test]
+    fn quarantine_cannot_share_the_download_tree() {
+        let directory = tempfile::tempdir().unwrap();
+        let downloads = directory.path().join("Downloads");
+        fs::create_dir_all(&downloads).unwrap();
+        let settings = RuntimeSettings {
+            download_dir: downloads.clone(),
+            quarantine_dir: downloads.join("quarantine"),
+            monitor_enabled: true,
+            start_at_login: false,
+        };
+
+        assert!(settings.validate().is_err());
+    }

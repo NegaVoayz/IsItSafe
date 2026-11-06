@@ -2,6 +2,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             download_dir: default_download_dir(),
+            storage: StorageConfig::default(),
+            runtime: RuntimeConfig::default(),
             security: SecurityConfig::default(),
             interaction: InteractionConfig::default(),
             limits: LimitsConfig::default(),
@@ -12,6 +14,23 @@ impl Default for Config {
             reports: ReportsConfig::default(),
             policy: PolicyConfig::default(),
             yara: YaraConfig::default(),
+        }
+    }
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            quarantine_dir: default_quarantine_dir(),
+        }
+    }
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            monitor_enabled: true,
+            start_at_login: false,
         }
     }
 }

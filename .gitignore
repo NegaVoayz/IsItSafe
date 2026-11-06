@@ -4,6 +4,8 @@
 /dist/
 /.isitsafe/
 /config.toml
+/config.toml.bak
+/config.toml.tmp
 /SECRET
 *.db
 *.db-shm

@@ -11,6 +11,7 @@ include!("types.rs");
 include!("defaults.rs");
 include!("loader.rs");
 include!("paths.rs");
+include!("settings.rs");
 
 #[cfg(test)]
 mod tests {

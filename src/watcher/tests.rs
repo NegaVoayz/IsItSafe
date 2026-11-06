@@ -14,14 +14,14 @@
             database: data_dir.join("state.db"),
             reports_dir: data_dir.join("reports"),
             logs_dir: data_dir.join("logs"),
-            quarantine_dir: data_dir.join("quarantine"),
             rules_dir: data_dir.join("rules"),
         };
         paths.ensure().unwrap();
-        let config = Config {
+        let mut config = Config {
             download_dir: directory.path().join("downloads"),
             ..Config::default()
         };
+        config.storage.quarantine_dir = data_dir.join("quarantine");
         fs::create_dir_all(&config.download_dir).unwrap();
         let database = Database::open(&paths.database).unwrap();
         (directory, Watcher::new(config, database, paths))
@@ -90,7 +90,6 @@
             database: data_dir.join("state.db"),
             reports_dir: data_dir.join("reports"),
             logs_dir: data_dir.join("logs"),
-            quarantine_dir: data_dir.join("quarantine"),
             rules_dir: data_dir.join("rules"),
         };
         paths.ensure().unwrap();

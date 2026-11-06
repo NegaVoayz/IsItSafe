@@ -54,7 +54,6 @@
             database: root.path().join("state.db"),
             reports_dir: root.path().join("reports"),
             logs_dir: root.path().join("logs"),
-            quarantine_dir: root.path().join("quarantine"),
             rules_dir: root.path().join("rules"),
         };
         let snapshot = load_snapshot(&config, &db, &paths).unwrap();
@@ -78,6 +77,7 @@
             download_dir: downloads,
             ..Config::default()
         };
+        config.storage.quarantine_dir = root.path().join("quarantine");
         config.security.block_execution_in_download_dir = false;
         let paths = AppPaths {
             config_file: root.path().join("config.toml"),
@@ -85,7 +85,6 @@
             database: root.path().join("state.db"),
             reports_dir: root.path().join("reports"),
             logs_dir: root.path().join("logs"),
-            quarantine_dir: root.path().join("quarantine"),
             rules_dir: root.path().join("rules"),
         };
         paths.ensure().unwrap();

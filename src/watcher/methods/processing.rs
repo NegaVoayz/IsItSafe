@@ -152,7 +152,7 @@ impl Watcher {
             report,
             &self.config,
             &self.database,
-            &self.paths.quarantine_dir,
+            self.config.quarantine_dir(),
         ) {
             Ok(Some(destination)) => {
                 report.policy.quarantine_path = Some(destination.to_string_lossy().into_owned());

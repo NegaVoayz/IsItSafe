@@ -5,6 +5,8 @@ pub const GIB: u64 = 1024 * MIB;
 #[serde(default)]
 pub struct Config {
     pub download_dir: PathBuf,
+    pub storage: StorageConfig,
+    pub runtime: RuntimeConfig,
     pub security: SecurityConfig,
     pub interaction: InteractionConfig,
     pub limits: LimitsConfig,
@@ -15,6 +17,23 @@ pub struct Config {
     pub reports: ReportsConfig,
     pub policy: PolicyConfig,
     pub yara: YaraConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StorageConfig {
+    /// Root directory for new quarantine entries. Existing entries remain at
+    /// their recorded paths if this location changes.
+    pub quarantine_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RuntimeConfig {
+    /// Whether the desktop application should keep the background monitor on.
+    pub monitor_enabled: bool,
+    /// Mirror of the per-user Windows sign-in registration managed by the UI.
+    pub start_at_login: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

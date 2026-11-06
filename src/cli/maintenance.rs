@@ -1,4 +1,10 @@
 fn initialize_download_security(config: &Config) -> Result<()> {
+    std::fs::create_dir_all(config.quarantine_dir()).with_context(|| {
+        format!(
+            "failed to create quarantine directory {}",
+            config.quarantine_dir().display()
+        )
+    })?;
     if config.security.block_execution_in_download_dir {
         let status = ensure_download_execution_barrier(&config.download_dir)?;
         println!(
