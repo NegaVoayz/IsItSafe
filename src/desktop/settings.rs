@@ -3,6 +3,7 @@ use parking_lot::RwLock;
 use std::fs;
 
 use crate::config::{AppPaths, Config, RuntimeSettings, save_runtime_settings};
+use crate::security::ensure_download_execution_barrier;
 use crate::startup;
 
 use super::monitor;
@@ -23,6 +24,9 @@ pub fn apply_runtime_settings(
     let previous = config.read().clone();
     let location_changed = previous.download_dir != desired.download_dir
         || previous.storage.quarantine_dir != desired.quarantine_dir;
+    if previous.security.block_execution_in_download_dir {
+        ensure_download_execution_barrier(&desired.download_dir)?;
+    }
     let startup_was_enabled = startup::is_enabled();
     startup::set_enabled(desired.start_at_login)?;
     if let Err(error) = save_runtime_settings(&paths.config_file, &desired) {
