@@ -123,7 +123,8 @@ pub struct VirusTotalConfig {
 pub struct ApiKey(String);
 
 impl ApiKey {
-    pub(crate) fn as_str(&self) -> &str {
+    /// Returns the key only to the narrow component that performs authenticated requests.
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }

@@ -1,0 +1,10 @@
+[package]
+name = "isitsafe-detect"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+
+[dependencies]
+isitsafe-report = { path = "../isitsafe-report" }
+zip = { version = "2", default-features = false, features = ["deflate", "bzip2", "lzma", "time"] }

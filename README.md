@@ -23,9 +23,22 @@ Encrypted RAR members, multivolume RAR sets, RAR 7 compression methods, and 7z e
 ## Build
 
 Windows 11 x64 and Rust 1.95 or newer are required.
+The project is a Cargo workspace split into `isitsafe-config`,
+`isitsafe-report`, `isitsafe-detect`, and `isitsafe-analysis` library crates,
+with the watcher, sandbox, database, CLI, and desktop application in the root
+`isitsafe` crate. Windows builds use the `rust-lld` linker bundled with the
+Rust toolchain, and release builds use parallel code generation to keep local
+iterations shorter.
 
 ```powershell
 cargo build --release
+```
+
+Run the complete workspace checks:
+
+```powershell
+cargo test --workspace --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
 Optional YARA-X support:
@@ -235,8 +248,8 @@ Verdicts are `Malicious`, `Suspicious`, `ReviewRequired`, `Unverified`, `Limited
 
 ```powershell
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets --all-features
 cargo check --features yara
 ```
 

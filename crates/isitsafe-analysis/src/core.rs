@@ -103,7 +103,7 @@ pub fn analyze_bytes_with_rules(
 
 #[cfg(feature = "yara")]
 fn inspect_yara(data: &[u8], custom_rules: Option<&str>, analysis: &mut ChildAnalysis) {
-    const BUILTIN_RULES: &str = include_str!("../../rules/default.yar");
+    const BUILTIN_RULES: &str = include_str!("../../../rules/default.yar");
     let mut source = String::from(BUILTIN_RULES);
     if let Some(custom) = custom_rules {
         source.push('\n');

@@ -11,9 +11,9 @@ use sha2::{Digest, Sha256};
 use x509_parser::prelude::*;
 use zip::ZipArchive;
 
-use crate::config::{Config, LimitsConfig};
-use crate::detect;
-use crate::report::{
+use isitsafe_config::{Config, LimitsConfig};
+use isitsafe_detect as detect;
+use isitsafe_report::{
     AuthenticityEvidence, Boundary, BoundaryKind, CertificateChainEvidence, CertificateRole,
     Classification, ComponentEvidence, Confidence, Evidence, ProductIdentityEvidence,
     PublisherReputation, RevocationEvidence, RevocationState, SandboxSelfTest, Severity,

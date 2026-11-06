@@ -94,7 +94,7 @@ fn zip_local_header_offsets(data: &[u8]) -> HashSet<u64> {
     offsets
 }
 
-pub(crate) fn pdf_stream_ranges(data: &[u8]) -> Vec<(u64, u64)> {
+pub fn pdf_stream_ranges(data: &[u8]) -> Vec<(u64, u64)> {
     const STREAM: &[u8] = b"stream";
     const END_STREAM: &[u8] = b"endstream";
     let mut ranges = Vec::new();

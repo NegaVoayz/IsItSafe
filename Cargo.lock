@@ -2828,23 +2828,18 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "cab",
- "cfb",
  "chrono",
  "clap",
- "cross-authenticode",
- "der",
  "eframe",
  "egui_extras",
- "goblin",
  "hex",
- "inno",
- "msi",
+ "isitsafe-analysis",
+ "isitsafe-config",
+ "isitsafe-detect",
+ "isitsafe-report",
  "notify",
- "nsis",
  "once_cell",
  "parking_lot",
- "rar-codec",
  "reqwest",
  "rfd",
  "ring",
@@ -2854,8 +2849,6 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
- "toml",
- "toml_edit 0.22.27",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -2866,9 +2859,61 @@ dependencies = [
  "windows",
  "windows-registry",
  "windows-sys 0.61.2",
+ "yara-x",
+]
+
+[[package]]
+name = "isitsafe-analysis"
+version = "0.1.0"
+dependencies = [
+ "cab",
+ "chrono",
+ "cross-authenticode",
+ "der",
+ "goblin",
+ "hex",
+ "inno",
+ "isitsafe-config",
+ "isitsafe-detect",
+ "isitsafe-report",
+ "msi",
+ "nsis",
+ "rar-codec",
+ "serde",
+ "sha2 0.10.9",
  "x509-parser 0.17.0",
  "yara-x",
  "zip 2.6.1",
+]
+
+[[package]]
+name = "isitsafe-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "tempfile",
+ "toml",
+ "toml_edit 0.22.27",
+ "url",
+]
+
+[[package]]
+name = "isitsafe-detect"
+version = "0.1.0"
+dependencies = [
+ "isitsafe-report",
+ "zip 2.6.1",
+]
+
+[[package]]
+name = "isitsafe-report"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

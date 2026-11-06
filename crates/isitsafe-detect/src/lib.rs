@@ -4,7 +4,7 @@ use std::path::Path;
 
 use zip::ZipArchive;
 
-use crate::report::{Classification, Confidence, DetectedFormat, Evidence, Severity};
+use isitsafe_report::{Classification, Confidence, DetectedFormat, Evidence, Severity};
 
 include!("sniff.rs");
 include!("scan.rs");

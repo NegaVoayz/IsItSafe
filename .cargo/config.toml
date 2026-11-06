@@ -1,0 +1,3 @@
+[target.x86_64-pc-windows-msvc]
+# Use the LLVM linker bundled with the Rust toolchain instead of MSVC link.exe.
+linker = "rust-lld.exe"

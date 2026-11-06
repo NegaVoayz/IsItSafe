@@ -1,14 +1,10 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 
-pub mod analysis;
 pub mod capture;
-pub mod config;
 pub mod db;
 pub mod desktop;
-pub mod detect;
 pub mod interaction;
 pub mod policy;
-pub mod report;
 pub mod reputation;
 pub mod sandbox;
 pub mod watcher;
@@ -21,6 +17,11 @@ pub use integration::origin;
 pub use network::{revocation, rules};
 pub(crate) use platform::process;
 pub use platform::{context_menu, logging, notification_activator, secrets, security, startup};
+
+pub use isitsafe_analysis as analysis;
+pub use isitsafe_config as config;
+pub use isitsafe_detect as detect;
+pub use isitsafe_report as report;
 
 pub use analysis::analyze_bytes;
 pub use config::Config;
